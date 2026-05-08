@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      // User profile document
+      allow read, write: if isOwner(userId);
+
+      // Provider connections (zerodha, gmail, etc.)
+      match /connections/{providerId} {
+        // Owner can read all their connections
+        allow read: if isOwner(userId);
+
+        // Create: incoming document must match path userId/providerId
+        allow create: if isOwner(userId)
+                      && request.resource.data.provider == providerId;
+
+        // Update: existing doc must still belong to same provider
+        allow update: if isOwner(userId)
+                      && resource.data.provider == providerId;
+
+        // Hard-delete not allowed from client; only callable functions should do this if ever needed
+        allow delete: if false;
+      }
+
+      // Holdings
+      match /holdings/{holdingId} {
+        // Reads: owner-only
+        allow read: if isOwner(userId);
+
+        // Creates: must belong to this user
+        allow create: if isOwner(userId)
+                      && request.resource.data.userId == userId;
+
+        // Updates/deletes: enforce ownership on existing document
+        allow update, delete: if isOwner(userId)
+                              && resource.data.userId == userId;
+      }
+
+      // Liabilities (credit cards, loans, etc.)
+      match /liabilities/{liabilityId} {
+        allow read: if isOwner(userId);
+
+        allow create: if isOwner(userId)
+                      && request.resource.data.userId == userId;
+
+        allow update, delete: if isOwner(userId)
+                              && resource.data.userId == userId;
+      }
+
+      // Transactions (optional; future use)
+      match /transactions/{transactionId} {
+        allow read: if isOwner(userId);
+
+        allow create: if isOwner(userId)
+                      && request.resource.data.userId == userId;
+
+        allow update, delete: if isOwner(userId)
+                              && resource.data.userId == userId;
+      }
+
+      // Parsed statements from Gmail
+      match /statements/{statementId} {
+        allow read: if isOwner(userId);
+
+        allow create: if isOwner(userId)
+                      && request.resource.data.userId == userId;
+
+        allow update, delete: if isOwner(userId)
+                              && resource.data.userId == userId;
+      }
+    }
+  }
+}
