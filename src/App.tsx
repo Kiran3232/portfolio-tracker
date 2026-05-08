@@ -269,7 +269,10 @@ export default function App() {
           </section>
 
           <section id="section-analytics" className="analytics-grid">
-            <NetworthTrend />
+            <NetworthTrend
+              totalAssets={totals.totalAssets}
+              totalLiabilities={totals.totalLiabilities}
+            />
             <AllocationChart assets={resolvedAssets} />
           </section>
 

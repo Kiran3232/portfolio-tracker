@@ -1,7 +1,9 @@
+import { useMemo } from 'react'
 import {
   Area,
   AreaChart,
   Bar,
+  CartesianGrid,
   Cell,
   Pie,
   PieChart,
@@ -10,40 +12,47 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { allocation as fallbackAllocation, monthlyTrend } from '../data/mockData'
-import type { AssetRow } from './AssetTable'
+
+interface AllocationAsset {
+  id: string
+  type: string
+  value: number
+}
+
+interface AllocationChartProps {
+  assets: AllocationAsset[]
+}
+
+interface NetworthTrendProps {
+  totalAssets: number
+  totalLiabilities: number
+}
 
 const colors = ['#01696f', '#4f98a3', '#6daa45', '#d19900', '#7a39bb']
 
-interface AllocationChartProps {
-  assets?: AssetRow[]
+function formatCurrency(value: number) {
+  return `₹${value.toLocaleString('en-IN')}`
 }
 
-export function AllocationChart({ assets = [] }: AllocationChartProps) {
-  const allocationData =
-    assets.length > 0
-      ? (() => {
-          const bucketMap = new Map<string, number>()
+export function AllocationChart({ assets }: AllocationChartProps) {
+  const allocation = useMemo(() => {
+    const total = assets.reduce((sum, asset) => sum + asset.value, 0)
+    if (total <= 0) return []
 
-          for (const asset of assets) {
-            const key = asset.type || 'Other'
-            const prev = bucketMap.get(key) ?? 0
-            bucketMap.set(key, prev + asset.value)
-          }
+    const grouped = assets.reduce<Record<string, number>>((acc, asset) => {
+      const key = asset.type || 'Other'
+      acc[key] = (acc[key] ?? 0) + asset.value
+      return acc
+    }, {})
 
-          const total = Array.from(bucketMap.values()).reduce(
-            (sum, value) => sum + value,
-            0
-          )
-
-          if (total <= 0) return fallbackAllocation
-
-          return Array.from(bucketMap.entries()).map(([name, value]) => ({
-            name,
-            value: Number(((value / total) * 100).toFixed(1)),
-          }))
-        })()
-      : fallbackAllocation
+    return Object.entries(grouped)
+      .map(([name, value]) => ({
+        name,
+        value,
+        percent: Number(((value / total) * 100).toFixed(1)),
+      }))
+      .sort((a, b) => b.value - a.value)
+  }, [assets])
 
   return (
     <div className="chart-card">
@@ -54,81 +63,141 @@ export function AllocationChart({ assets = [] }: AllocationChartProps) {
         </div>
       </div>
 
-      <div className="chart-wrap pie">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={allocationData}
-              dataKey="value"
-              nameKey="name"
-              innerRadius={64}
-              outerRadius={96}
-              paddingAngle={3}
-            >
-              {allocationData.map((entry, index) => (
-                <Cell
-                  key={entry.name}
-                  fill={colors[index % colors.length]}
+      {allocation.length === 0 ? (
+        <div className="empty-state">
+          <p>No live asset allocation yet.</p>
+          <p className="muted">
+            Sync holdings from Firebase to render the portfolio mix.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="chart-wrap pie">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={allocation}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={64}
+                  outerRadius={96}
+                  paddingAngle={3}
+                >
+                  {allocation.map((entry, index) => (
+                    <Cell
+                      key={entry.name}
+                      fill={colors[index % colors.length]}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value: number) => formatCurrency(value)}
                 />
-              ))}
-            </Pie>
-            <Tooltip formatter={(value: number) => `${value}%`} />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="legend-grid">
-        {allocationData.map((entry, index) => (
-          <div key={entry.name} className="legend-item">
-            <span
-              className="dot"
-              style={{ background: colors[index % colors.length] }}
-            />
-            <span>{entry.name}</span>
-            <strong>{entry.value}%</strong>
+              </PieChart>
+            </ResponsiveContainer>
           </div>
-        ))}
-      </div>
+
+          <div className="legend-grid">
+            {allocation.map((entry, index) => (
+              <div key={entry.name} className="legend-item">
+                <span
+                  className="dot"
+                  style={{ background: colors[index % colors.length] }}
+                />
+                <span>{entry.name}</span>
+                <strong>{entry.percent}%</strong>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
 
-export function NetworthTrend() {
+export function NetworthTrend({
+  totalAssets,
+  totalLiabilities,
+}: NetworthTrendProps) {
+  const liveSnapshot = useMemo(() => {
+    const networth = totalAssets - totalLiabilities
+
+    return [
+      {
+        label: 'Today',
+        assets: totalAssets,
+        liabilities: totalLiabilities,
+        networth,
+      },
+    ]
+  }, [totalAssets, totalLiabilities])
+
   return (
     <div className="chart-card wide">
       <div className="section-head">
         <div>
           <p className="eyebrow">Momentum</p>
-          <h3>Assets vs liabilities</h3>
+          <h3>Live assets vs liabilities</h3>
         </div>
       </div>
-      <div className="chart-wrap">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={monthlyTrend}>
-            <defs>
-              <linearGradient id="assetsGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#01696f" stopOpacity={0.35} />
-                <stop offset="95%" stopColor="#01696f" stopOpacity={0.03} />
-              </linearGradient>
-            </defs>
-            <XAxis dataKey="month" axisLine={false} tickLine={false} />
-            <YAxis axisLine={false} tickLine={false} />
-            <Tooltip />
-            <Area
-              type="monotone"
-              dataKey="assets"
-              stroke="#01696f"
-              fill="url(#assetsGrad)"
-              strokeWidth={3}
-            />
-            <Bar
-              dataKey="liabilities"
-              fill="#d19900"
-              radius={[8, 8, 0, 0]}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+
+      {totalAssets <= 0 && totalLiabilities <= 0 ? (
+        <div className="empty-state">
+          <p>No live balance snapshot yet.</p>
+          <p className="muted">
+            Connect providers and sync data to render current assets and dues.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="chart-wrap">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={liveSnapshot}>
+                <defs>
+                  <linearGradient id="assetsGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#01696f" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#01696f" stopOpacity={0.03} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.18} />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`}
+                />
+                <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                <Area
+                  type="monotone"
+                  dataKey="assets"
+                  stroke="#01696f"
+                  fill="url(#assetsGrad)"
+                  strokeWidth={3}
+                />
+                <Bar dataKey="liabilities" fill="#d19900" radius={[8, 8, 0, 0]} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="legend-grid">
+            <div className="legend-item">
+              <span className="dot" style={{ background: '#01696f' }} />
+              <span>Assets</span>
+              <strong>{formatCurrency(totalAssets)}</strong>
+            </div>
+            <div className="legend-item">
+              <span className="dot" style={{ background: '#d19900' }} />
+              <span>Liabilities</span>
+              <strong>{formatCurrency(totalLiabilities)}</strong>
+            </div>
+            <div className="legend-item">
+              <span className="dot" style={{ background: '#6daa45' }} />
+              <span>Net worth</span>
+              <strong>{formatCurrency(totalAssets - totalLiabilities)}</strong>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
