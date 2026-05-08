@@ -1,7 +1,7 @@
 {
   "hosting": {
     "public": "dist",
-    "site": "portfolio-tracker-3232.web.app",
+    "site": "portfolio-tracker-3232",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
