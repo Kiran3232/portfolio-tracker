@@ -7,6 +7,7 @@ import { ConnectionCard } from './components/ConnectionCard'
 import { KpiCard } from './components/KpiCard'
 import { LiabilityList } from './components/LiabilityList'
 import { Sidebar } from './components/Sidebar'
+import { StatementsList } from './components/StatementsList'
 import { connections as fallbackConnections } from './data/mockData'
 import { useAuthSession } from './hooks/useAuthSession'
 import { useDashboardRealtime } from './hooks/useDashboardRealtime'
@@ -55,10 +56,12 @@ export default function App() {
     holdings,
     connections,
     liabilities,
+    statements,
     loading,
     error,
     holdingsLoaded,
     liabilitiesLoaded,
+    statementsLoaded,
   } = useDashboardRealtime(user?.uid)
 
   const [busyProvider, setBusyProvider] = useState<string | null>(null)
@@ -90,10 +93,7 @@ export default function App() {
   }))
 
   const resolvedConnections = useMemo(() => {
-    const merged = new Map<
-      ConnectionRecord['provider'],
-      ConnectionRecord
-    >()
+    const merged = new Map<ConnectionRecord['provider'], ConnectionRecord>()
 
     for (const fallback of mapFallbackConnections()) {
       merged.set(fallback.provider, fallback)
@@ -243,6 +243,7 @@ export default function App() {
                 Liabilities ₹{totals.totalLiabilities.toLocaleString('en-IN')}
               </span>
               <span>{resolvedConnections.length} providers tracked</span>
+              <span>{statements.length} statements indexed</span>
             </div>
           </section>
 
@@ -260,9 +261,9 @@ export default function App() {
               tone="warning"
             />
             <KpiCard
-              label="Connected user"
-              value={user.displayName ?? 'Google account'}
-              delta={user.email ?? 'Authenticated'}
+              label="Statements"
+              value={String(statements.length)}
+              delta={statementsLoaded ? 'Realtime Gmail index' : 'Loading...'}
               tone="neutral"
             />
           </section>
@@ -310,6 +311,13 @@ export default function App() {
             </div>
 
             <AssetTable assets={assetsForTable} loading={!holdingsLoaded} />
+          </section>
+
+          <section id="section-statements">
+            <StatementsList
+              statements={statements}
+              loading={!statementsLoaded}
+            />
           </section>
 
           <section id="section-liabilities">

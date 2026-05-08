@@ -53,5 +53,5 @@ export interface StatementRecord {
     transactionCount?: number
   }
   parsedText?: string
-  createdAt?: string
+  createdAt?: string | { toDate: () => Date }
 }

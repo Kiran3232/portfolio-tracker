@@ -1,26 +1,24 @@
 import { useEffect, useState } from 'react'
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-} from 'firebase/firestore'
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import type {
   ConnectionRecord,
   HoldingRecord,
   LiabilityRecord,
+  StatementRecord,
 } from '../types/domain'
 
 interface RealtimeState {
   holdings: HoldingRecord[]
   connections: ConnectionRecord[]
   liabilities: LiabilityRecord[]
+  statements: StatementRecord[]
   loading: boolean
   error: string | null
   holdingsLoaded: boolean
   liabilitiesLoaded: boolean
   connectionsLoaded: boolean
+  statementsLoaded: boolean
 }
 
 export function useDashboardRealtime(userId?: string | null): RealtimeState {
@@ -28,11 +26,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
     holdings: [],
     connections: [],
     liabilities: [],
+    statements: [],
     loading: true,
     error: null,
     holdingsLoaded: false,
     liabilitiesLoaded: false,
     connectionsLoaded: false,
+    statementsLoaded: false,
   })
 
   useEffect(() => {
@@ -41,11 +41,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
         holdings: [],
         connections: [],
         liabilities: [],
+        statements: [],
         loading: false,
         error: null,
         holdingsLoaded: false,
         liabilitiesLoaded: false,
         connectionsLoaded: false,
+        statementsLoaded: false,
       })
       return
     }
@@ -54,11 +56,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
       holdings: [],
       connections: [],
       liabilities: [],
+      statements: [],
       loading: true,
       error: null,
       holdingsLoaded: false,
       liabilitiesLoaded: false,
       connectionsLoaded: false,
+      statementsLoaded: false,
     })
 
     const holdingsQuery = query(
@@ -66,13 +70,28 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
       orderBy('updatedAt', 'desc')
     )
 
-    const connectionsQuery = query(
-      collection(db, 'users', userId, 'connections')
-    )
+    const connectionsQuery = query(collection(db, 'users', userId, 'connections'))
 
     const liabilitiesQuery = query(
       collection(db, 'users', userId, 'liabilities'),
       orderBy('updatedAt', 'desc')
+    )
+
+    const statementsQuery = query(
+      collection(db, 'users', userId, 'statements'),
+      orderBy('createdAt', 'desc')
+    )
+
+    const getLoading = (
+      holdingsLoaded: boolean,
+      liabilitiesLoaded: boolean,
+      connectionsLoaded: boolean,
+      statementsLoaded: boolean
+    ) => !(
+      holdingsLoaded &&
+      liabilitiesLoaded &&
+      connectionsLoaded &&
+      statementsLoaded
     )
 
     const unsubHoldings = onSnapshot(
@@ -84,19 +103,17 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
             ...(doc.data() as Omit<HoldingRecord, 'id'>),
           }))
 
-          const holdingsLoaded = true
-          const loading = !(
-            holdingsLoaded &&
-            current.liabilitiesLoaded &&
-            current.connectionsLoaded
-          )
-
           return {
             ...current,
             holdings,
-            holdingsLoaded,
-            loading,
-            error: null,
+            holdingsLoaded: true,
+            loading: getLoading(
+              true,
+              current.liabilitiesLoaded,
+              current.connectionsLoaded,
+              current.statementsLoaded
+            ),
+            error: current.error,
           }
         })
       },
@@ -106,12 +123,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
           ...current,
           holdings: [],
           holdingsLoaded: true,
-          loading: !(
-            true &&
-            current.liabilitiesLoaded &&
-            current.connectionsLoaded
+          loading: getLoading(
+            true,
+            current.liabilitiesLoaded,
+            current.connectionsLoaded,
+            current.statementsLoaded
           ),
-          error: 'Failed to load holdings from Firebase.',
+          error: current.error ?? 'Failed to load holdings from Firebase.',
         }))
       }
     )
@@ -125,19 +143,17 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
             ...(doc.data() as Omit<ConnectionRecord, 'provider'>),
           }))
 
-          const connectionsLoaded = true
-          const loading = !(
-            current.holdingsLoaded &&
-            current.liabilitiesLoaded &&
-            connectionsLoaded
-          )
-
           return {
             ...current,
             connections,
-            connectionsLoaded,
-            loading,
-            error: null,
+            connectionsLoaded: true,
+            loading: getLoading(
+              current.holdingsLoaded,
+              current.liabilitiesLoaded,
+              true,
+              current.statementsLoaded
+            ),
+            error: current.error,
           }
         })
       },
@@ -147,12 +163,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
           ...current,
           connections: [],
           connectionsLoaded: true,
-          loading: !(
-            current.holdingsLoaded &&
-            current.liabilitiesLoaded &&
-            true
+          loading: getLoading(
+            current.holdingsLoaded,
+            current.liabilitiesLoaded,
+            true,
+            current.statementsLoaded
           ),
-          error: 'Failed to load connections from Firebase.',
+          error: current.error ?? 'Failed to load connections from Firebase.',
         }))
       }
     )
@@ -166,19 +183,17 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
             ...(doc.data() as Omit<LiabilityRecord, 'id'>),
           }))
 
-          const liabilitiesLoaded = true
-          const loading = !(
-            current.holdingsLoaded &&
-            liabilitiesLoaded &&
-            current.connectionsLoaded
-          )
-
           return {
             ...current,
             liabilities,
-            liabilitiesLoaded,
-            loading,
-            error: null,
+            liabilitiesLoaded: true,
+            loading: getLoading(
+              current.holdingsLoaded,
+              true,
+              current.connectionsLoaded,
+              current.statementsLoaded
+            ),
+            error: current.error,
           }
         })
       },
@@ -188,12 +203,53 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
           ...current,
           liabilities: [],
           liabilitiesLoaded: true,
-          loading: !(
-            current.holdingsLoaded &&
-            true &&
-            current.connectionsLoaded
+          loading: getLoading(
+            current.holdingsLoaded,
+            true,
+            current.connectionsLoaded,
+            current.statementsLoaded
           ),
-          error: 'Failed to load liabilities from Firebase.',
+          error: current.error ?? 'Failed to load liabilities from Firebase.',
+        }))
+      }
+    )
+
+    const unsubStatements = onSnapshot(
+      statementsQuery,
+      (snapshot) => {
+        setState((current) => {
+          const statements = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...(doc.data() as Omit<StatementRecord, 'id'>),
+          }))
+
+          return {
+            ...current,
+            statements,
+            statementsLoaded: true,
+            loading: getLoading(
+              current.holdingsLoaded,
+              current.liabilitiesLoaded,
+              current.connectionsLoaded,
+              true
+            ),
+            error: current.error,
+          }
+        })
+      },
+      (error) => {
+        console.error('Statements snapshot error', error)
+        setState((current) => ({
+          ...current,
+          statements: [],
+          statementsLoaded: true,
+          loading: getLoading(
+            current.holdingsLoaded,
+            current.liabilitiesLoaded,
+            current.connectionsLoaded,
+            true
+          ),
+          error: current.error ?? 'Failed to load statements from Firebase.',
         }))
       }
     )
@@ -202,6 +258,7 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
       unsubHoldings()
       unsubConnections()
       unsubLiabilities()
+      unsubStatements()
     }
   }, [userId])
 
