@@ -34,5 +34,5 @@ export async function launchProviderConnect(type: 'zerodha' | 'gmail') {
   }
 
   const payload = await connectGmail()
-  window.open(payload.authUrl, '_blank', 'noopener,noreferrer')
+  window.open(payload.url, '_blank', 'noopener,noreferrer')
 }

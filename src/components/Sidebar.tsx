@@ -19,7 +19,7 @@ type SidebarItemId =
 interface SidebarItem {
   id: SidebarItemId
   label: string
-  icon: React.ComponentType<{ size?: number }>
+  icon: React.ComponentType<{ size?: number | string }>
 }
 
 const items: SidebarItem[] = [

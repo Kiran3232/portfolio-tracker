@@ -61,6 +61,7 @@ export interface StatementRecord {
   snippet?: string
   attachmentName?: string | null
   attachmentNames?: string[]
+  parsed?: boolean
   statementSummary?: {
     totalDue?: number
     minimumDue?: number
