@@ -1,5 +1,3 @@
-// src/components/ConnectionCard.tsx
-
 import type { ConnectionRecord } from '../types/domain'
 
 interface ConnectionCardProps {
@@ -14,15 +12,19 @@ function formatLastSync(lastSyncAt?: unknown): string {
 
   let date: Date
 
-  // Firestore Timestamp
-  if (typeof lastSyncAt === 'object' && lastSyncAt !== null && 'toDate' in lastSyncAt) {
-    // @ts-expect-error – runtime check above
-    date = lastSyncAt.toDate()
+  if (
+    typeof lastSyncAt === 'object' &&
+    lastSyncAt !== null &&
+    'toDate' in lastSyncAt
+  ) {
+    date = (lastSyncAt as { toDate: () => Date }).toDate()
   } else {
-    date = new Date(lastSyncAt as any)
+    date = new Date(lastSyncAt as string)
   }
 
-  if (Number.isNaN(date.getTime())) return 'Last sync unknown'
+  if (Number.isNaN(date.getTime())) {
+    return String(lastSyncAt)
+  }
 
   const diffMs = Date.now() - date.getTime()
   const diffMin = Math.floor(diffMs / (1000 * 60))
@@ -35,18 +37,34 @@ function formatLastSync(lastSyncAt?: unknown): string {
   return `Synced ${diffDays} day${diffDays === 1 ? '' : 's'} ago`
 }
 
-function getStatusLabel(status?: ConnectionRecord['status']) {
-  if (!status) return 'Not connected'
-  if (status === 'connected') return 'Connected'
-  if (status === 'error') return 'Error'
-  return status
+function getStatusClass(status?: ConnectionRecord['status']) {
+  switch (status) {
+    case 'connected':
+      return 'status connected'
+    case 'syncing':
+      return 'status syncing'
+    case 'manual':
+      return 'status manual'
+    case 'error':
+      return 'status manual'
+    default:
+      return 'status manual'
+  }
 }
 
-function getStatusClass(status?: ConnectionRecord['status']) {
-  if (status === 'connected') return 'status-pill status-pill--ok'
-  if (status === 'error') return 'status-pill status-pill--error'
-  if (status === 'syncing') return 'status-pill status-pill--sync'
-  return 'status-pill status-pill--idle'
+function getStatusLabel(status?: ConnectionRecord['status']) {
+  switch (status) {
+    case 'connected':
+      return 'connected'
+    case 'syncing':
+      return 'syncing'
+    case 'manual':
+      return 'manual'
+    case 'error':
+      return 'error'
+    default:
+      return 'disconnected'
+  }
 }
 
 export function ConnectionCard({
@@ -56,50 +74,42 @@ export function ConnectionCard({
   busyProvider,
 }: ConnectionCardProps) {
   const isBusy = busyProvider === connection.provider
-  const statusLabel = getStatusLabel(connection.status)
-  const statusClass = getStatusClass(connection.status)
-
   const canSync = connection.status === 'connected'
+  const description =
+    (connection.metadata?.description as string) ??
+    `Provider: ${connection.provider}`
 
   return (
     <article className="connection-card">
-      <header className="connection-card__header">
+      <div className="connection-row">
         <div>
-          <h4 className="connection-card__title">
-            {connection.accountLabel ?? connection.provider}
-          </h4>
-          <p className="connection-card__subtitle">
-            {(connection.metadata?.description as string) ??
-              `Provider: ${connection.provider}`}
-          </p>
+          <strong>{connection.accountLabel ?? connection.provider}</strong>
+          <p>{description}</p>
         </div>
-        <span className={statusClass}>{statusLabel}</span>
-      </header>
-
-      <div className="connection-card__meta">
-        <p className="connection-card__last-sync">
-          {formatLastSync(connection.lastSyncAt)}
-        </p>
+        <span className={getStatusClass(connection.status)}>
+          {getStatusLabel(connection.status)}
+        </span>
       </div>
 
-      <div className="connection-card__actions">
+      <p>{formatLastSync(connection.lastSyncAt)}</p>
+
+      <div className="connection-footer">
         <button
           type="button"
-          className="btn-secondary"
+          className="ghost-btn"
           onClick={() => onConnect(connection.provider)}
           disabled={isBusy}
         >
           {connection.status === 'connected' ? 'Reconnect' : 'Connect'}
         </button>
+
         <button
           type="button"
-          className="btn-primary"
+          className="ghost-btn"
           onClick={() => onSync(connection.provider)}
           disabled={!canSync || isBusy}
         >
-          {isBusy && connection.provider === busyProvider
-            ? 'Syncing...'
-            : 'Sync now'}
+          {isBusy ? 'Syncing...' : 'Sync now'}
         </button>
       </div>
     </article>

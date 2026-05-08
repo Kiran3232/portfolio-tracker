@@ -1,9 +1,50 @@
-import { Area, AreaChart, Bar, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { allocation, monthlyTrend } from '../data/mockData'
+import {
+  Area,
+  AreaChart,
+  Bar,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import { allocation as fallbackAllocation, monthlyTrend } from '../data/mockData'
+import type { AssetRow } from './AssetTable'
 
 const colors = ['#01696f', '#4f98a3', '#6daa45', '#d19900', '#7a39bb']
 
-export function AllocationChart() {
+interface AllocationChartProps {
+  assets?: AssetRow[]
+}
+
+export function AllocationChart({ assets = [] }: AllocationChartProps) {
+  const allocationData =
+    assets.length > 0
+      ? (() => {
+          const bucketMap = new Map<string, number>()
+
+          for (const asset of assets) {
+            const key = asset.type || 'Other'
+            const prev = bucketMap.get(key) ?? 0
+            bucketMap.set(key, prev + asset.value)
+          }
+
+          const total = Array.from(bucketMap.values()).reduce(
+            (sum, value) => sum + value,
+            0
+          )
+
+          if (total <= 0) return fallbackAllocation
+
+          return Array.from(bucketMap.entries()).map(([name, value]) => ({
+            name,
+            value: Number(((value / total) * 100).toFixed(1)),
+          }))
+        })()
+      : fallbackAllocation
+
   return (
     <div className="chart-card">
       <div className="section-head">
@@ -12,22 +53,37 @@ export function AllocationChart() {
           <h3>Asset allocation</h3>
         </div>
       </div>
+
       <div className="chart-wrap pie">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={allocation} dataKey="value" nameKey="name" innerRadius={64} outerRadius={96} paddingAngle={3}>
-              {allocation.map((entry, index) => (
-                <Cell key={entry.name} fill={colors[index % colors.length]} />
+            <Pie
+              data={allocationData}
+              dataKey="value"
+              nameKey="name"
+              innerRadius={64}
+              outerRadius={96}
+              paddingAngle={3}
+            >
+              {allocationData.map((entry, index) => (
+                <Cell
+                  key={entry.name}
+                  fill={colors[index % colors.length]}
+                />
               ))}
             </Pie>
             <Tooltip formatter={(value: number) => `${value}%`} />
           </PieChart>
         </ResponsiveContainer>
       </div>
+
       <div className="legend-grid">
-        {allocation.map((entry, index) => (
+        {allocationData.map((entry, index) => (
           <div key={entry.name} className="legend-item">
-            <span className="dot" style={{ background: colors[index % colors.length] }} />
+            <span
+              className="dot"
+              style={{ background: colors[index % colors.length] }}
+            />
             <span>{entry.name}</span>
             <strong>{entry.value}%</strong>
           </div>
@@ -58,8 +114,18 @@ export function NetworthTrend() {
             <XAxis dataKey="month" axisLine={false} tickLine={false} />
             <YAxis axisLine={false} tickLine={false} />
             <Tooltip />
-            <Area type="monotone" dataKey="assets" stroke="#01696f" fill="url(#assetsGrad)" strokeWidth={3} />
-            <Bar dataKey="liabilities" fill="#d19900" radius={[8, 8, 0, 0]} />
+            <Area
+              type="monotone"
+              dataKey="assets"
+              stroke="#01696f"
+              fill="url(#assetsGrad)"
+              strokeWidth={3}
+            />
+            <Bar
+              dataKey="liabilities"
+              fill="#d19900"
+              radius={[8, 8, 0, 0]}
+            />
           </AreaChart>
         </ResponsiveContainer>
       </div>

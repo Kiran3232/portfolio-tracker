@@ -7,81 +7,120 @@ import { ConnectionCard } from './components/ConnectionCard'
 import { KpiCard } from './components/KpiCard'
 import { LiabilityList } from './components/LiabilityList'
 import { Sidebar } from './components/Sidebar'
-import {
-  assets as fallbackAssets,
-  connections as fallbackConnections,
-  liabilities as fallbackLiabilities,
-} from './data/mockData'
+import { connections as fallbackConnections } from './data/mockData'
 import { useAuthSession } from './hooks/useAuthSession'
 import { useDashboardRealtime } from './hooks/useDashboardRealtime'
 import type { ConnectionRecord } from './types/domain'
-import { launchProviderConnect, syncGmailStatements, syncZerodha } from './services/api'
+import {
+  launchProviderConnect,
+  syncGmailStatements,
+  syncZerodha,
+} from './services/api'
 
 function mapFallbackConnections(): ConnectionRecord[] {
   return fallbackConnections.map((connection) => ({
     provider: connection.id,
-    status: connection.status,
-    lastSyncAt: connection.lastSync,
+    status: 'disconnected',
+    lastSyncAt: undefined,
     accountLabel: connection.name,
     metadata: { description: connection.description },
   }))
 }
 
+function normalizeHoldingType(
+  type?: string
+): 'Stock' | 'ETF' | 'Mutual Fund' | 'Smallcase' | 'Cash' {
+  const normalized = String(type ?? 'stock').toLowerCase().replace(/ /g, '_')
+
+  switch (normalized) {
+    case 'stock':
+      return 'Stock'
+    case 'etf':
+      return 'ETF'
+    case 'mutual_fund':
+    case 'mutual fund':
+      return 'Mutual Fund'
+    case 'smallcase':
+      return 'Smallcase'
+    case 'cash':
+      return 'Cash'
+    default:
+      return 'Stock'
+  }
+}
+
 export default function App() {
   const { user, loading: authLoading, login, logout } = useAuthSession()
-  const { holdings, connections, liabilities, loading } = useDashboardRealtime(user?.uid)
-  const [busyProvider, setBusyProvider] = useState<string | null>(null)
+  const {
+    holdings,
+    connections,
+    liabilities,
+    loading,
+    error,
+    holdingsLoaded,
+    liabilitiesLoaded,
+  } = useDashboardRealtime(user?.uid)
 
-  // Search + view-all toggle
+  const [busyProvider, setBusyProvider] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [showAllAssets, setShowAllAssets] = useState(false)
 
-  const resolvedAssets = holdings.length > 0
-    ? holdings.map((item) => ({
-        id: item.id,
-        name: item.name,
-        type: (item.type ?? 'Stock').replace('_', ' ') as
-          | 'Stock'
-          | 'ETF'
-          | 'Mutual Fund'
-          | 'Smallcase'
-          | 'Cash',
-        source: item.source,
-        value: item.currentValue,
-        change: Number(
-          (
-            ((item.currentPrice - item.avgBuyPrice) /
-              Math.max(item.avgBuyPrice, 1)) *
-            100
-          ).toFixed(1)
-        ),
-      }))
-    : fallbackAssets
+  const resolvedAssets = holdings.map((item) => ({
+    id: item.id,
+    name: item.name,
+    type: normalizeHoldingType(item.type),
+    source: item.source,
+    value: item.currentValue,
+    change: Number(
+      (
+        ((item.currentPrice - item.avgBuyPrice) /
+          Math.max(item.avgBuyPrice, 1)) *
+        100
+      ).toFixed(1)
+    ),
+  }))
 
-  const resolvedLiabilities = liabilities.length > 0
-    ? liabilities.map((item) => ({
-        id: item.id,
-        name: item.provider,
-        provider: item.provider,
-        outstanding: item.currentOutstanding,
-        dueDate: item.dueDate,
-        utilization: item.utilization ?? 0,
-      }))
-    : fallbackLiabilities
+  const resolvedLiabilities = liabilities.map((item) => ({
+    id: item.id,
+    name: item.provider,
+    provider: item.provider,
+    outstanding: item.currentOutstanding,
+    dueDate: item.dueDate,
+    utilization: item.utilization ?? 0,
+  }))
 
-  const resolvedConnections =
-    connections.length > 0 ? connections : mapFallbackConnections()
+  const resolvedConnections = useMemo(() => {
+    const merged = new Map<
+      ConnectionRecord['provider'],
+      ConnectionRecord
+    >()
 
-  // Top assets vs all
-  const topAssets = useMemo(
-    () =>
-      [...resolvedAssets]
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 5),
-    [resolvedAssets]
-  )
+    for (const fallback of mapFallbackConnections()) {
+      merged.set(fallback.provider, fallback)
+    }
 
-  // Apply search on whichever set is active
+    for (const live of connections) {
+      const existing = merged.get(live.provider)
+
+      merged.set(live.provider, {
+        ...(existing ?? { provider: live.provider, status: 'disconnected' }),
+        ...live,
+        metadata: {
+          ...(existing?.metadata ?? {}),
+          ...(live.metadata ?? {}),
+        },
+      } as ConnectionRecord)
+    }
+
+    return Array.from(merged.values())
+  }, [connections])
+
+  const topAssets = useMemo(() => {
+    return [...resolvedAssets]
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5)
+  }, [resolvedAssets])
+
   const baseAssetsForTable = showAllAssets ? resolvedAssets : topAssets
 
   const assetsForTable = useMemo(() => {
@@ -92,7 +131,9 @@ export default function App() {
       return (
         asset.name.toLowerCase().includes(q) ||
         asset.type.toLowerCase().includes(q) ||
-        (asset.source ?? '').toLowerCase().includes(q)
+        String(asset.source ?? '')
+          .toLowerCase()
+          .includes(q)
       )
     })
   }, [baseAssetsForTable, searchTerm])
@@ -106,6 +147,7 @@ export default function App() {
       (sum, item) => sum + item.outstanding,
       0
     )
+
     return {
       totalAssets,
       totalLiabilities,
@@ -140,6 +182,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <Sidebar />
+
       <div className="content-shell">
         <header className="topbar">
           <div>
@@ -150,6 +193,7 @@ export default function App() {
                 : 'Portfolio and liability control center'}
             </h2>
           </div>
+
           <div className="topbar-actions">
             <label className="search-box">
               <Search size={16} />
@@ -159,9 +203,11 @@ export default function App() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </label>
+
             <button className="icon-btn" aria-label="Notifications">
               <Bell size={18} />
             </button>
+
             <button
               className="icon-btn"
               aria-label="Sign out"
@@ -172,8 +218,15 @@ export default function App() {
           </div>
         </header>
 
+        {error ? (
+          <div className="empty-state">
+            <p>Firebase data could not be loaded.</p>
+            <p className="muted">{error}</p>
+          </div>
+        ) : null}
+
         <main className="main-grid">
-          <section className="hero-panel">
+          <section id="section-overview" className="hero-panel">
             <div>
               <p className="eyebrow">Net worth</p>
               <h3>₹{totals.netWorth.toLocaleString('en-IN')}</h3>
@@ -183,10 +236,9 @@ export default function App() {
                 connections, and parsed statement summaries.
               </p>
             </div>
+
             <div className="hero-badges">
-              <span>
-                Assets ₹{totals.totalAssets.toLocaleString('en-IN')}
-              </span>
+              <span>Assets ₹{totals.totalAssets.toLocaleString('en-IN')}</span>
               <span>
                 Liabilities ₹{totals.totalLiabilities.toLocaleString('en-IN')}
               </span>
@@ -198,13 +250,13 @@ export default function App() {
             <KpiCard
               label="Total assets"
               value={`₹${totals.totalAssets.toLocaleString('en-IN')}`}
-              delta="Live Firestore ledger"
+              delta={holdingsLoaded ? 'Live Firestore ledger' : 'Loading...'}
               tone="positive"
             />
             <KpiCard
               label="Total liabilities"
               value={`₹${totals.totalLiabilities.toLocaleString('en-IN')}`}
-              delta="Statement-backed dues"
+              delta={liabilitiesLoaded ? 'Firebase liabilities' : 'Loading...'}
               tone="warning"
             />
             <KpiCard
@@ -215,16 +267,19 @@ export default function App() {
             />
           </section>
 
-          <NetworthTrend />
-          <AllocationChart />
+          <section id="section-analytics" className="analytics-grid">
+            <NetworthTrend />
+            <AllocationChart assets={resolvedAssets} />
+          </section>
 
-          <section className="sync-section">
+          <section id="section-sync" className="sync-section">
             <div className="section-head">
               <div>
                 <p className="eyebrow">Connectors</p>
                 <h3>Data sync center</h3>
               </div>
             </div>
+
             <div className="connection-grid">
               {resolvedConnections.map((connection) => (
                 <ConnectionCard
@@ -238,26 +293,31 @@ export default function App() {
             </div>
           </section>
 
-          <section className="top-assets-header">
+          <section id="section-assets" className="table-card">
             <div className="section-head">
               <div>
-                <p className="eyebrow">Top assets</p>
-                <h3>
-                  {showAllAssets ? 'All assets' : 'Top 5 by value'}
-                </h3>
+                <p className="eyebrow">Assets</p>
+                <h3>{showAllAssets ? 'All assets' : 'Top 5 by value'}</h3>
               </div>
+
               <button
                 type="button"
-                className="link-btn"
+                className="ghost-btn"
                 onClick={() => setShowAllAssets((prev) => !prev)}
               >
                 {showAllAssets ? 'Show top 5' : 'View all'}
               </button>
             </div>
+
+            <AssetTable assets={assetsForTable} loading={!holdingsLoaded} />
           </section>
 
-          <AssetTable assets={assetsForTable} />
-          <LiabilityList liabilities={resolvedLiabilities} />
+          <section id="section-liabilities">
+            <LiabilityList
+              liabilities={resolvedLiabilities}
+              loading={!liabilitiesLoaded}
+            />
+          </section>
         </main>
       </div>
     </div>
