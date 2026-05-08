@@ -4,6 +4,7 @@ import { AssetTable } from './components/AssetTable'
 import { AuthPanel } from './components/AuthPanel'
 import { AllocationChart, NetworthTrend } from './components/Charts'
 import { ConnectionCard } from './components/ConnectionCard'
+import { CurrencySwitch } from './components/CurrencySwitch'
 import { KpiCard } from './components/KpiCard'
 import { LiabilityList } from './components/LiabilityList'
 import { Sidebar } from './components/Sidebar'
@@ -11,16 +12,23 @@ import { StatementsList } from './components/StatementsList'
 import { connections as fallbackConnections } from './data/mockData'
 import { useAuthSession } from './hooks/useAuthSession'
 import { useDashboardRealtime } from './hooks/useDashboardRealtime'
-import type { ConnectionRecord } from './types/domain'
+import { useFxRate } from './hooks/useFxRate'
 import {
   launchProviderConnect,
   syncGmailStatements,
   syncZerodha,
+  uploadIndmoneyReports,
 } from './services/api'
+import type { ConnectionRecord } from './types/domain'
+import {
+  convertCurrency,
+  formatMoney,
+  type SupportedCurrency,
+} from './utils/currency'
 
 function mapFallbackConnections(): ConnectionRecord[] {
   return fallbackConnections.map((connection) => ({
-    provider: connection.id,
+    provider: connection.id as ConnectionRecord['provider'],
     status: 'disconnected',
     lastSyncAt: undefined,
     accountLabel: connection.name,
@@ -63,10 +71,12 @@ export default function App() {
     liabilitiesLoaded,
     statementsLoaded,
   } = useDashboardRealtime(user?.uid)
+  const { usdInr, loading: fxLoading, error: fxError } = useFxRate()
 
   const [busyProvider, setBusyProvider] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [showAllAssets, setShowAllAssets] = useState(false)
+  const [displayCurrency, setDisplayCurrency] = useState<SupportedCurrency>('INR')
 
   const resolvedAssets = holdings.map((item) => ({
     id: item.id,
@@ -74,6 +84,7 @@ export default function App() {
     type: normalizeHoldingType(item.type),
     source: item.source,
     value: item.currentValue,
+    currency: (item.currency || 'INR') as SupportedCurrency,
     change: Number(
       (
         ((item.currentPrice - item.avgBuyPrice) /
@@ -90,6 +101,7 @@ export default function App() {
     outstanding: item.currentOutstanding,
     dueDate: item.dueDate,
     utilization: item.utilization ?? 0,
+    currency: (item.currency || 'INR') as SupportedCurrency,
   }))
 
   const resolvedConnections = useMemo(() => {
@@ -101,7 +113,6 @@ export default function App() {
 
     for (const live of connections) {
       const existing = merged.get(live.provider)
-
       merged.set(live.provider, {
         ...(existing ?? { provider: live.provider, status: 'disconnected' }),
         ...live,
@@ -115,11 +126,10 @@ export default function App() {
     return Array.from(merged.values())
   }, [connections])
 
-  const topAssets = useMemo(() => {
-    return [...resolvedAssets]
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5)
-  }, [resolvedAssets])
+  const topAssets = useMemo(
+    () => [...resolvedAssets].sort((a, b) => b.value - a.value).slice(0, 5),
+    [resolvedAssets]
+  )
 
   const baseAssetsForTable = showAllAssets ? resolvedAssets : topAssets
 
@@ -127,33 +137,42 @@ export default function App() {
     const q = searchTerm.trim().toLowerCase()
     if (!q) return baseAssetsForTable
 
-    return baseAssetsForTable.filter((asset) => {
-      return (
+    return baseAssetsForTable.filter(
+      (asset) =>
         asset.name.toLowerCase().includes(q) ||
         asset.type.toLowerCase().includes(q) ||
-        String(asset.source ?? '')
-          .toLowerCase()
-          .includes(q)
-      )
-    })
+        String(asset.source ?? '').toLowerCase().includes(q)
+    )
   }, [baseAssetsForTable, searchTerm])
 
   const totals = useMemo(() => {
-    const totalAssets = resolvedAssets.reduce(
-      (sum, item) => sum + item.value,
+    const totalAssetsInInr = resolvedAssets.reduce(
+      (sum, item) => sum + convertCurrency(item.value, item.currency, 'INR', usdInr),
       0
     )
-    const totalLiabilities = resolvedLiabilities.reduce(
-      (sum, item) => sum + item.outstanding,
+
+    const totalLiabilitiesInInr = resolvedLiabilities.reduce(
+      (sum, item) =>
+        sum + convertCurrency(item.outstanding, item.currency, 'INR', usdInr),
       0
     )
 
     return {
-      totalAssets,
-      totalLiabilities,
-      netWorth: totalAssets - totalLiabilities,
+      totalAssets: convertCurrency(totalAssetsInInr, 'INR', displayCurrency, usdInr),
+      totalLiabilities: convertCurrency(
+        totalLiabilitiesInInr,
+        'INR',
+        displayCurrency,
+        usdInr
+      ),
+      netWorth: convertCurrency(
+        totalAssetsInInr - totalLiabilitiesInInr,
+        'INR',
+        displayCurrency,
+        usdInr
+      ),
     }
-  }, [resolvedAssets, resolvedLiabilities])
+  }, [resolvedAssets, resolvedLiabilities, displayCurrency, usdInr])
 
   async function handleConnect(provider: ConnectionRecord['provider']) {
     setBusyProvider(provider)
@@ -170,6 +189,21 @@ export default function App() {
     try {
       if (provider === 'zerodha') await syncZerodha()
       if (provider === 'gmail') await syncGmailStatements()
+    } finally {
+      setBusyProvider(null)
+    }
+  }
+
+  async function handleIndmoneyUpload({
+    holdings: holdingsFile,
+    orders: ordersFile,
+  }: {
+    holdings: File
+    orders: File
+  }) {
+    setBusyProvider('indmoney')
+    try {
+      await uploadIndmoneyReports(holdingsFile, ordersFile)
     } finally {
       setBusyProvider(null)
     }
@@ -225,39 +259,53 @@ export default function App() {
           </div>
         ) : null}
 
+        {fxError ? (
+          <div className="empty-state">
+            <p>Live FX rate could not be refreshed.</p>
+            <p className="muted">{fxError}</p>
+          </div>
+        ) : null}
+
         <main className="main-grid">
           <section id="section-overview" className="hero-panel">
             <div>
               <p className="eyebrow">Net worth</p>
-              <h3>₹{totals.netWorth.toLocaleString('en-IN')}</h3>
+              <h3>{formatMoney(totals.netWorth, displayCurrency)}</h3>
               <p className="hero-copy">
-                Signed in as {user.displayName ?? user.email}. This dashboard
-                now uses Firestore-only persistence for holdings, liabilities,
-                connections, and parsed statement summaries.
+                Signed in as {user.displayName ?? user.email}. Native asset
+                currency is preserved, while totals and table values can be
+                switched between INR and USD.
               </p>
             </div>
 
             <div className="hero-badges">
-              <span>Assets ₹{totals.totalAssets.toLocaleString('en-IN')}</span>
+              <span>Assets {formatMoney(totals.totalAssets, displayCurrency)}</span>
               <span>
-                Liabilities ₹{totals.totalLiabilities.toLocaleString('en-IN')}
+                Liabilities {formatMoney(totals.totalLiabilities, displayCurrency)}
               </span>
               <span>{resolvedConnections.length} providers tracked</span>
               <span>{statements.length} statements indexed</span>
             </div>
           </section>
 
+          <CurrencySwitch
+            value={displayCurrency}
+            onChange={setDisplayCurrency}
+            usdInr={usdInr}
+            loading={fxLoading}
+          />
+
           <section className="kpi-grid">
             <KpiCard
               label="Total assets"
-              value={`₹${totals.totalAssets.toLocaleString('en-IN')}`}
-              delta={holdingsLoaded ? 'Live Firestore ledger' : 'Loading...'}
+              value={formatMoney(totals.totalAssets, displayCurrency)}
+              delta={holdingsLoaded ? `Displayed in ${displayCurrency}` : 'Loading...'}
               tone="positive"
             />
             <KpiCard
               label="Total liabilities"
-              value={`₹${totals.totalLiabilities.toLocaleString('en-IN')}`}
-              delta={liabilitiesLoaded ? 'Firebase liabilities' : 'Loading...'}
+              value={formatMoney(totals.totalLiabilities, displayCurrency)}
+              delta={liabilitiesLoaded ? `Displayed in ${displayCurrency}` : 'Loading...'}
               tone="warning"
             />
             <KpiCard
@@ -291,6 +339,7 @@ export default function App() {
                   connection={connection}
                   onConnect={handleConnect}
                   onSync={handleSync}
+                  onIndmoneyUpload={handleIndmoneyUpload}
                   busyProvider={busyProvider}
                 />
               ))}
@@ -313,7 +362,12 @@ export default function App() {
               </button>
             </div>
 
-            <AssetTable assets={assetsForTable} loading={!holdingsLoaded} />
+            <AssetTable
+              assets={assetsForTable}
+              loading={!holdingsLoaded}
+              displayCurrency={displayCurrency}
+              usdInrRate={usdInr}
+            />
           </section>
 
           <section id="section-statements">

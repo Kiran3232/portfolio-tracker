@@ -1,9 +1,11 @@
+import { useRef, useState } from 'react'
 import type { ConnectionRecord } from '../types/domain'
 
 interface ConnectionCardProps {
   connection: ConnectionRecord
-  onConnect: (provider: ConnectionRecord['provider']) => void
-  onSync: (provider: ConnectionRecord['provider']) => void
+  onConnect: (provider: ConnectionRecord['provider']) => void | Promise<void>
+  onSync: (provider: ConnectionRecord['provider']) => void | Promise<void>
+  onIndmoneyUpload?: (files: { holdings: File; orders: File }) => void | Promise<void>
   busyProvider: string | null
 }
 
@@ -46,7 +48,7 @@ function getStatusClass(status?: ConnectionRecord['status']) {
     case 'manual':
       return 'status manual'
     case 'error':
-      return 'status manual'
+      return 'status error'
     default:
       return 'status manual'
   }
@@ -71,13 +73,25 @@ export function ConnectionCard({
   connection,
   onConnect,
   onSync,
+  onIndmoneyUpload,
   busyProvider,
 }: ConnectionCardProps) {
   const isBusy = busyProvider === connection.provider
+  const isIndmoney = connection.provider === 'indmoney'
   const canSync = connection.status === 'connected'
   const description =
     (connection.metadata?.description as string) ??
     `Provider: ${connection.provider}`
+
+  const [holdingsFile, setHoldingsFile] = useState<File | null>(null)
+  const [ordersFile, setOrdersFile] = useState<File | null>(null)
+  const holdingsRef = useRef<HTMLInputElement | null>(null)
+  const ordersRef = useRef<HTMLInputElement | null>(null)
+
+  async function handleUpload() {
+    if (!holdingsFile || !ordersFile || !onIndmoneyUpload) return
+    await onIndmoneyUpload({ holdings: holdingsFile, orders: ordersFile })
+  }
 
   return (
     <article className="connection-card">
@@ -93,25 +107,82 @@ export function ConnectionCard({
 
       <p>{formatLastSync(connection.lastSyncAt)}</p>
 
-      <div className="connection-footer">
-        <button
-          type="button"
-          className="ghost-btn"
-          onClick={() => onConnect(connection.provider)}
-          disabled={isBusy}
-        >
-          {connection.status === 'connected' ? 'Reconnect' : 'Connect'}
-        </button>
+      {isIndmoney ? (
+        <div className="upload-section">
+          <div className="file-upload-grid">
+            <label className="file-upload-box">
+              <span className="file-upload-label">Holdings report</span>
+              <input
+                ref={holdingsRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => setHoldingsFile(e.target.files?.[0] ?? null)}
+              />
+              <span className="file-upload-name">
+                {holdingsFile?.name ?? 'Choose HOLDINGS_BOOK file'}
+              </span>
+            </label>
 
-        <button
-          type="button"
-          className="ghost-btn"
-          onClick={() => onSync(connection.provider)}
-          disabled={!canSync || isBusy}
-        >
-          {isBusy ? 'Syncing...' : 'Sync now'}
-        </button>
-      </div>
+            <label className="file-upload-box">
+              <span className="file-upload-label">Orders report</span>
+              <input
+                ref={ordersRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => setOrdersFile(e.target.files?.[0] ?? null)}
+              />
+              <span className="file-upload-name">
+                {ordersFile?.name ?? 'Choose ORDER_BOOK file'}
+              </span>
+            </label>
+          </div>
+
+          <div className="connection-footer">
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => {
+                setHoldingsFile(null)
+                setOrdersFile(null)
+                if (holdingsRef.current) holdingsRef.current.value = ''
+                if (ordersRef.current) ordersRef.current.value = ''
+              }}
+              disabled={isBusy}
+            >
+              Clear
+            </button>
+
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() => void handleUpload()}
+              disabled={!holdingsFile || !ordersFile || isBusy}
+            >
+              {isBusy ? 'Uploading...' : 'Upload reports'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="connection-footer">
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => onConnect(connection.provider)}
+            disabled={isBusy}
+          >
+            {connection.status === 'connected' ? 'Reconnect' : 'Connect'}
+          </button>
+
+          <button
+            type="button"
+            className="primary-btn"
+            onClick={() => onSync(connection.provider)}
+            disabled={!canSync || isBusy}
+          >
+            {isBusy ? 'Syncing...' : 'Sync now'}
+          </button>
+        </div>
+      )}
     </article>
   )
 }

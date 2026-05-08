@@ -1,57 +1,80 @@
-export type ProviderId = 'zerodha' | 'indmoney' | 'smallcase' | 'tickertape' | 'gmail'
+export type ProviderType =
+  | 'zerodha'
+  | 'indmoney'
+  | 'smallcase'
+  | 'tickertape'
+  | 'gmail'
 
-export interface ConnectionRecord {
-  provider: ProviderId
-  status: 'connected' | 'syncing' | 'manual' | 'disconnected' | 'error'
-  lastSyncAt?: string
-  accountLabel?: string
-  metadata?: Record<string, unknown>
-}
+export type ConnectionStatus =
+  | 'connected'
+  | 'syncing'
+  | 'manual'
+  | 'error'
+  | 'disconnected'
 
 export interface HoldingRecord {
   id: string
-  userId: string
-  source: ProviderId | 'manual'
-  instrumentId: string
-  symbol: string
+  instrumentId?: string
+  instrumentToken?: number | null
+  symbol?: string
+  exchange?: string | null
+  segment?: string | null
+  isin?: string | null
+  product?: string | null
   name: string
-  type: 'stock' | 'etf' | 'mutual_fund' | 'smallcase' | 'cash'
+  type?: string
+  source: ProviderType | string
+  provider?: ProviderType | string
   quantity: number
   avgBuyPrice: number
   currentPrice: number
   currentValue: number
-  currency: 'INR' | 'USD'
-  updatedAt?: string
+  currency?: 'INR' | 'USD' | string
+  pnl?: number
+  dayChange?: number
+  dayChangePercentage?: number
+  updatedAt?: unknown
 }
 
 export interface LiabilityRecord {
   id: string
-  userId: string
-  type: 'credit_card' | 'loan' | 'emi'
   provider: string
-  accountNumberMasked: string
+  type?: string
+  accountNumberMasked?: string
   currentOutstanding: number
-  dueAmount: number
-  dueDate: string
+  dueAmount?: number
+  dueDate?: string
   utilization?: number
-  updatedAt?: string
+  source?: string
+  sourceMessageId?: string
+  updatedAt?: unknown
+  currency?: 'INR' | 'USD' | string
 }
 
 export interface StatementRecord {
   id: string
-  userId: string
-  type: 'credit_card' | 'bank'
   provider: string
-  gmailMessageId?: string
-  attachmentName?: string
+  type?: string
+  source?: string
   subject?: string
-  parsed: boolean
+  from?: string
+  snippet?: string
+  attachmentName?: string | null
+  attachmentNames?: string[]
   statementSummary?: {
     totalDue?: number
     minimumDue?: number
     dueDate?: string
     transactionCount?: number
   }
-  parsedText?: string
-  createdAt?: string | { toDate: () => Date }
+  createdAt?: unknown
+  updatedAt?: unknown
+}
+
+export interface ConnectionRecord {
+  provider: ProviderType
+  status: ConnectionStatus
+  lastSyncAt?: unknown
+  accountLabel?: string
+  metadata?: Record<string, unknown>
 }

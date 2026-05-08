@@ -1,72 +1,81 @@
-export interface AssetRow {
+import { convertCurrency, formatMoney, type SupportedCurrency } from '../utils/currency'
+
+interface AssetRow {
   id: string
   name: string
-  type: string
+  type: 'Stock' | 'ETF' | 'Mutual Fund' | 'Smallcase' | 'Cash'
   source?: string
   value: number
   change: number
+  currency?: string
 }
 
 interface AssetTableProps {
   assets: AssetRow[]
   loading?: boolean
+  displayCurrency: SupportedCurrency
+  usdInrRate: number
 }
 
-export function AssetTable({ assets, loading = false }: AssetTableProps) {
-  if (loading) {
-    return (
-      <div className="table-wrapper">
-        <div className="empty-state">
-          <p>Loading holdings from Firebase...</p>
-          <p className="muted">Please wait while your portfolio is fetched.</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (assets.length === 0) {
-    return (
-      <div className="empty-state">
-        <p>No holdings found.</p>
-        <p className="muted">
-          Connect a provider and run a sync to load portfolio data.
-        </p>
-      </div>
-    )
-  }
-
+export function AssetTable({
+  assets,
+  loading = false,
+  displayCurrency,
+  usdInrRate,
+}: AssetTableProps) {
   return (
-    <div className="table-wrapper">
+    <div className="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Instrument</th>
+            <th>Asset</th>
             <th>Type</th>
             <th>Source</th>
-            <th className="numeric">Value</th>
-            <th className="numeric">1D</th>
+            <th>Value</th>
+            <th>Native</th>
+            <th>Change</th>
           </tr>
         </thead>
         <tbody>
-          {assets.map((asset) => (
-            <tr key={asset.id}>
-              <td>{asset.name}</td>
-              <td>{asset.type}</td>
-              <td>{asset.source ?? '-'}</td>
-              <td className="numeric">
-                ₹{asset.value.toLocaleString('en-IN')}
-              </td>
-              <td
-                className={
-                  'numeric ' +
-                  (asset.change >= 0 ? 'positive-text' : 'negative-text')
-                }
-              >
-                {asset.change >= 0 ? '+' : ''}
-                {asset.change.toFixed(1)}%
+          {loading ? (
+            <tr>
+              <td colSpan={6} className="muted">
+                Loading assets...
               </td>
             </tr>
-          ))}
+          ) : assets.length === 0 ? (
+            <tr>
+              <td colSpan={6} className="muted">
+                No assets found.
+              </td>
+            </tr>
+          ) : (
+            assets.map((asset) => {
+              const nativeCurrency = (asset.currency || 'INR') as SupportedCurrency
+              const displayValue = convertCurrency(
+                asset.value,
+                nativeCurrency,
+                displayCurrency,
+                usdInrRate
+              )
+
+              return (
+                <tr key={asset.id}>
+                  <td>
+                    <strong>{asset.name}</strong>
+                  </td>
+                  <td>{asset.type}</td>
+                  <td>{asset.source ?? '-'}</td>
+                  <td>{formatMoney(displayValue, displayCurrency)}</td>
+                  <td>{formatMoney(asset.value, nativeCurrency)}</td>
+                  <td className={asset.change >= 0 ? 'positive' : 'negative'}>
+                    {asset.change >= 0 ? '+' : ''}
+                    {asset.change.toFixed(1)}%
+                  </td>
+                </tr>
+              )
+            })
+          )}
         </tbody>
       </table>
     </div>

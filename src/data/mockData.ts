@@ -22,7 +22,7 @@ export interface LiabilityItem {
   name: string
   provider: string
   outstanding: number
-  dueDate: string
+  dueDate: string | undefined
   utilization: number
 }
 
