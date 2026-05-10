@@ -25,6 +25,7 @@ import {
   formatMoney,
   type SupportedCurrency,
 } from './utils/currency'
+import { AnimatedNumber } from './components/AnimatedNumber'
 
 function mapFallbackConnections(): ConnectionRecord[] {
   return fallbackConnections.map((connection) => ({
@@ -270,7 +271,12 @@ export default function App() {
           <section id="section-overview" className="hero-panel">
             <div>
               <p className="eyebrow">Net worth</p>
-              <h3>{formatMoney(totals.netWorth, displayCurrency)}</h3>
+              <h3>
+                <AnimatedNumber
+                  value={totals.netWorth}
+                  format={(v) => formatMoney(v, displayCurrency)}
+                />
+              </h3>
               <p className="hero-copy">
                 Signed in as {user.displayName ?? user.email}. Native asset
                 currency is preserved, while totals and table values can be
@@ -298,19 +304,22 @@ export default function App() {
           <section className="kpi-grid">
             <KpiCard
               label="Total assets"
-              value={formatMoney(totals.totalAssets, displayCurrency)}
+              valueNumber={totals.totalAssets}
+              currency={displayCurrency}
               delta={holdingsLoaded ? `Displayed in ${displayCurrency}` : 'Loading...'}
               tone="positive"
             />
             <KpiCard
               label="Total liabilities"
-              value={formatMoney(totals.totalLiabilities, displayCurrency)}
+              valueNumber={totals.totalLiabilities}
+              currency={displayCurrency}
               delta={liabilitiesLoaded ? `Displayed in ${displayCurrency}` : 'Loading...'}
               tone="warning"
             />
             <KpiCard
               label="Statements"
-              value={String(statements.length)}
+              valueNumber={statements.length}
+              currency={displayCurrency}
               delta={statementsLoaded ? 'Realtime Gmail index' : 'Loading...'}
               tone="neutral"
             />
