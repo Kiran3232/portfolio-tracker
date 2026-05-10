@@ -1,16 +1,39 @@
+import { AnimatedNumber } from './AnimatedNumber'
+import { formatMoney, type SupportedCurrency } from '../utils/currency'
+
 interface KpiCardProps {
   label: string
-  value: string
+  value?: string
+  valueNumber?: number
+  currency?: SupportedCurrency
   delta: string
-  tone?: 'positive' | 'neutral' | 'warning'
+  tone?: 'positive' | 'warning' | 'neutral'
 }
 
-export function KpiCard({ label, value, delta, tone = 'neutral' }: KpiCardProps) {
+export function KpiCard({
+  label,
+  value,
+  valueNumber,
+  currency = 'INR',
+  delta,
+  tone = 'neutral',
+}: KpiCardProps) {
   return (
-    <article className="kpi-card">
-      <p className="eyebrow">{label}</p>
-      <h2>{value}</h2>
-      <span className={`delta ${tone}`}>{delta}</span>
+    <article className={`kpi-card tone-${tone}`}>
+      <div>
+        <p>{label}</p>
+        <strong>
+          {typeof valueNumber === 'number' ? (
+            <AnimatedNumber
+              value={valueNumber}
+              format={(v) => formatMoney(v, currency)}
+            />
+          ) : (
+            value
+          )}
+        </strong>
+      </div>
+      <span>{delta}</span>
     </article>
   )
 }
