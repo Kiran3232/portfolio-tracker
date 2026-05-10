@@ -76,6 +76,15 @@ service cloud.firestore {
         allow update, delete: if isOwner(userId)
                               && resource.data.userId == userId;
       }
+
+      // Manual fixed deposits
+      match /fixed_deposits/{fixedDepositId} {
+        allow read: if isOwner(userId);
+
+        allow create: if isOwner(userId);
+
+        allow update, delete: if isOwner(userId);
+      }
     }
   }
 }

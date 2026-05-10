@@ -114,3 +114,56 @@ export async function markStatementUnpaid(statementId: string) {
   })
   return data as { ok: true; liabilitiesImported: number }
 }
+
+export async function createFixedDeposit(payload: {
+  bankName: string
+  amount: number
+  interestRate?: number | null
+  startDate: string
+  maturityDate: string
+  maturityAmount: number
+  compoundFrequency: 'monthly' | 'quarterly' | 'half_yearly' | 'yearly'
+  accountNumberLast4?: string | null
+  currency?: 'INR' | 'USD'
+}) {
+  const data = await authorizedFetch('/api/fixed-deposits', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+  return data as { ok: true; id: string }
+}
+
+
+export async function updateFixedDeposit(
+  fixedDepositId: string,
+  payload: {
+    bankName: string
+    amount: number
+    interestRate?: number | null
+    startDate: string
+    maturityDate: string
+    maturityAmount: number
+    compoundFrequency: 'monthly' | 'quarterly' | 'half_yearly' | 'yearly'
+    accountNumberLast4?: string | null
+    currency?: 'INR' | 'USD'
+  }
+) {
+  const data = await authorizedFetch(`/api/fixed-deposits/${fixedDepositId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+  return data as { ok: true; id: string }
+}
+
+export async function deleteFixedDeposit(fixedDepositId: string) {
+  const data = await authorizedFetch(`/api/fixed-deposits/${fixedDepositId}`, {
+    method: 'DELETE',
+  })
+  return data as { ok: true; id: string }
+}

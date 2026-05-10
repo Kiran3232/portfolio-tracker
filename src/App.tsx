@@ -6,6 +6,7 @@ import { AllocationChart, NetworthTrend } from './components/Charts'
 import { ConnectionCard } from './components/ConnectionCard'
 import { CurrencySwitch } from './components/CurrencySwitch'
 import { KpiCard } from './components/KpiCard'
+import { FixedDepositSection } from './components/FixedDepositSection'
 import { LiabilityList } from './components/LiabilityList'
 import { Sidebar } from './components/Sidebar'
 import { StatementsList } from './components/StatementsList'
@@ -39,7 +40,7 @@ function mapFallbackConnections(): ConnectionRecord[] {
 
 function normalizeHoldingType(
   type?: string
-): 'Stock' | 'ETF' | 'Mutual Fund' | 'Smallcase' | 'Cash' {
+): 'Stock' | 'ETF' | 'Mutual Fund' | 'Smallcase' | 'Cash' | 'FD' {
   const normalized = String(type ?? 'stock').toLowerCase().replace(/ /g, '_')
 
   switch (normalized) {
@@ -54,6 +55,9 @@ function normalizeHoldingType(
       return 'Smallcase'
     case 'cash':
       return 'Cash'
+    case 'fd':
+    case 'fixed_deposit':
+      return 'FD'
     default:
       return 'Stock'
   }
@@ -66,6 +70,7 @@ export default function App() {
     connections,
     liabilities,
     statements,
+    fixedDeposits,
     loading,
     error,
     holdingsLoaded,
@@ -79,7 +84,7 @@ export default function App() {
   const [showAllAssets, setShowAllAssets] = useState(false)
   const [displayCurrency, setDisplayCurrency] = useState<SupportedCurrency>('INR')
 
-  const resolvedAssets = holdings.map((item) => ({
+  const liveAssets = holdings.map((item) => ({
     id: item.id,
     name: item.name,
     type: normalizeHoldingType(item.type),
@@ -94,6 +99,18 @@ export default function App() {
       ).toFixed(1)
     ),
   }))
+
+  const fdAssets = fixedDeposits.map((item) => ({
+    id: item.id,
+    name: `${item.bankName} FD${item.accountNumberLast4 ? ` • ${item.accountNumberLast4}` : ''}`,
+    type: 'FD' as const,
+    source: item.source || 'manual',
+    value: Number(item.amount || 0),
+    currency: (item.currency || 'INR') as SupportedCurrency,
+    change: Number(item.interestRate || 0),
+  }))
+
+  const resolvedAssets = [...liveAssets, ...fdAssets]
 
   const resolvedLiabilities = liabilities.map((item) => ({
     id: item.id,
@@ -380,6 +397,8 @@ export default function App() {
               ))}
             </div>
           </section>
+
+          <FixedDepositSection fixedDeposits={fixedDeposits} />
 
           <section id="section-assets" className="table-card">
             <div className="section-head">

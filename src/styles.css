@@ -183,7 +183,7 @@ button {
 }
 
 .search-box {
-  min-width: 320px;
+  min-width: 60%;
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -506,10 +506,6 @@ button {
     align-items: stretch;
   }
 
-  .search-box {
-    min-width: 100%;
-  }
-
   .hero-panel,
   .liability-item {
     grid-template-columns: 1fr;
@@ -748,5 +744,133 @@ button {
   .connection-footer {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+.fd-badges {
+  margin-top: 16px;
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 70;
+}
+
+.fd-drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  background: var(--color-surface, #fff);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  padding: 20px;
+  box-shadow: 0 -20px 60px rgba(15, 23, 42, 0.2);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.fd-drawer-handle {
+  width: 56px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.35);
+  margin: 0 auto 16px;
+}
+
+.fd-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.fd-select-box {
+  padding-right: 12px;
+}
+
+.fd-select-box select {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  font: inherit;
+}
+
+.fd-preview-card {
+  margin-top: 16px;
+  padding: 16px;
+}
+
+.fd-error-text {
+  margin-top: 12px;
+  color: #dc2626;
+}
+
+.fd-drawer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+  .fd-drawer {
+    padding: 16px;
+    max-height: 90vh;
+  }
+
+  .fd-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fd-drawer-actions {
+    flex-direction: column-reverse;
+  }
+
+  .fd-drawer-actions button {
+    width: 100%;
+  }
+}
+
+
+.fd-item {
+  gap: 16px;
+}
+
+.fd-item-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.fd-item-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.fd-delete-btn {
+  color: #dc2626;
+}
+
+@media (max-width: 640px) {
+  .fd-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .fd-item-side {
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .fd-item-actions {
+    width: 100%;
+    flex-direction: column;
   }
 }

@@ -3,7 +3,7 @@ import { convertCurrency, formatMoney, type SupportedCurrency } from '../utils/c
 interface AssetRow {
   id: string
   name: string
-  type: 'Stock' | 'ETF' | 'Mutual Fund' | 'Smallcase' | 'Cash'
+  type: 'Stock' | 'ETF' | 'Mutual Fund' | 'Smallcase' | 'Cash' | 'FD'
   source?: string
   value: number
   change: number

@@ -4,6 +4,7 @@ export type ProviderType =
   | 'smallcase'
   | 'tickertape'
   | 'gmail'
+  | 'manual'
 
 export type ConnectionStatus =
   | 'connected'
@@ -84,4 +85,20 @@ export interface ConnectionRecord {
   lastSyncAt?: unknown
   accountLabel?: string
   metadata?: Record<string, unknown>
+}
+
+export interface FixedDepositRecord {
+  id: string
+  bankName: string
+  amount: number
+  interestRate?: number | null
+  startDate?: string | null
+  maturityDate?: string | null
+  maturityAmount?: number | null
+  compoundFrequency?: 'monthly' | 'quarterly' | 'half_yearly' | 'yearly' | string
+  accountNumberLast4?: string | null
+  currency?: 'INR' | 'USD' | string
+  source?: ProviderType | string
+  createdAt?: unknown
+  updatedAt?: unknown
 }

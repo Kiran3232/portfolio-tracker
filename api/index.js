@@ -693,7 +693,6 @@ app.get('/api/zerodha/holdings', authMiddleware, async (req, res) => {
   }
 })
 
-
 function normalizeProviderKey(provider = '') {
   return String(provider).toLowerCase().replace(/[^a-z0-9]+/g, '-')
 }
@@ -744,53 +743,6 @@ function inferStatementProvider(subject = '', from = '', filename = '') {
   if (text.includes('au small finance')) return 'AU Bank'
 
   return 'Unknown Provider'
-}
-
-function looksLikeCreditCardStatement({ subject = '', from = '', snippet = '', attachmentNames = [] }) {
-  const haystack = `${subject} ${from} ${snippet} ${attachmentNames.join(' ')}`.toLowerCase()
-
-  const positiveSignals = [
-    'credit card',
-    'card statement',
-    'statement of account',
-    'monthly statement',
-    'total amount due',
-    'minimum amount due',
-    'payment due',
-    'amount due',
-    'credit card statement',
-    'card ending',
-    'xxxx',
-    'statement',
-  ]
-
-  const negativeSignals = [
-    'debit card',
-    'savings account',
-    'current account',
-    'bank statement',
-    'transaction alert',
-    'upi',
-    'imps',
-    'neft',
-    'rtgs',
-    'cash withdrawal',
-    'salary',
-    'credited',
-    'debited',
-    'utr',
-    'avl bal',
-    'available balance',
-    'loan statement',
-    'mutual fund',
-    'demat',
-    'brokerage',
-  ]
-
-  const positiveCount = positiveSignals.filter((signal) => haystack.includes(signal)).length
-  const hasNegative = negativeSignals.some((signal) => haystack.includes(signal))
-
-  return positiveCount >= 2 && !hasNegative
 }
 
 function extractStatementSummary(text = '') {
@@ -954,7 +906,6 @@ app.get('/api/gmail/callback', async (req, res) => {
 
     const consumed = await consumeOAuthState(rawState, 'gmail')
     uid = consumed.uid
-
     const client = getGmailOAuthClient()
     const { tokens } = await client.getToken(code)
 
@@ -1178,6 +1129,7 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
       await statementRef.set(statementDoc, { merge: true })
       imported += 1
     }
+
     const existingStatementsSnap = await statementsRef
       .where('source', '==', 'gmail')
       .get()
@@ -1553,6 +1505,129 @@ app.post(
     }
   }
 )
+
+function normalizeFixedDepositPayload(body = {}) {
+  const bankName = String(body.bankName || '').trim()
+  const amount = Number(body.amount || 0)
+  const interestRate = body.interestRate === null || body.interestRate === undefined || body.interestRate === ''
+    ? null
+    : Number(body.interestRate)
+  const startDate = String(body.startDate || '').trim()
+  const maturityDate = String(body.maturityDate || '').trim()
+  const maturityAmount = Number(body.maturityAmount || amount || 0)
+  const accountNumberLast4 = body.accountNumberLast4
+    ? String(body.accountNumberLast4).trim().slice(-4)
+    : null
+  const compoundFrequency = String(body.compoundFrequency || 'quarterly').trim()
+  const currency = String(body.currency || 'INR').trim().toUpperCase()
+
+  if (!bankName) {
+    throw new Error('bankName is required')
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('amount must be a positive number')
+  }
+
+  if (!startDate) {
+    throw new Error('startDate is required')
+  }
+
+  if (!maturityDate) {
+    throw new Error('maturityDate is required')
+  }
+
+  return {
+    bankName,
+    amount,
+    interestRate: Number.isFinite(interestRate) ? interestRate : null,
+    startDate,
+    maturityDate,
+    maturityAmount: Number.isFinite(maturityAmount) ? maturityAmount : amount,
+    accountNumberLast4,
+    compoundFrequency,
+    currency,
+    source: 'manual',
+  }
+}
+
+app.post('/api/fixed-deposits', authMiddleware, async (req, res) => {
+  try {
+    const payload = normalizeFixedDepositPayload(req.body)
+    const fixedDepositRef = db
+      .collection('users')
+      .doc(req.user.uid)
+      .collection('fixed_deposits')
+      .doc()
+
+    await fixedDepositRef.set({
+      userId: req.user.uid,
+      ...payload,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    })
+
+    await upsertConnection(req.user.uid, 'manual_assets', {
+      status: 'connected',
+      accountLabel: 'Manual assets',
+      metadata: {
+        description: 'Manual fixed deposits and other manually added assets',
+      },
+    })
+
+    return res.json({ ok: true, id: fixedDepositRef.id })
+  } catch (error) {
+    console.error('Fixed deposit create error', error)
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : 'Failed to create fixed deposit',
+    })
+  }
+})
+
+app.patch('/api/fixed-deposits/:fixedDepositId', authMiddleware, async (req, res) => {
+  try {
+    const payload = normalizeFixedDepositPayload(req.body)
+    const fixedDepositRef = db
+      .collection('users')
+      .doc(req.user.uid)
+      .collection('fixed_deposits')
+      .doc(req.params.fixedDepositId)
+
+    await fixedDepositRef.set(
+      {
+        ...payload,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    )
+
+    return res.json({ ok: true, id: req.params.fixedDepositId })
+  } catch (error) {
+    console.error('Fixed deposit update error', error)
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : 'Failed to update fixed deposit',
+    })
+  }
+})
+
+app.delete('/api/fixed-deposits/:fixedDepositId', authMiddleware, async (req, res) => {
+  try {
+    const fixedDepositRef = db
+      .collection('users')
+      .doc(req.user.uid)
+      .collection('fixed_deposits')
+      .doc(req.params.fixedDepositId)
+
+    await fixedDepositRef.delete()
+
+    return res.json({ ok: true, id: req.params.fixedDepositId })
+  } catch (error) {
+    console.error('Fixed deposit delete error', error)
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : 'Failed to delete fixed deposit',
+    })
+  }
+})
 
 const PORT = process.env.PORT || 4000
 

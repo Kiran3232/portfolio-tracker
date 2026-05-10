@@ -3,6 +3,7 @@ import { collection, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import type {
   ConnectionRecord,
+  FixedDepositRecord,
   HoldingRecord,
   LiabilityRecord,
   StatementRecord,
@@ -13,12 +14,30 @@ interface RealtimeState {
   connections: ConnectionRecord[]
   liabilities: LiabilityRecord[]
   statements: StatementRecord[]
+  fixedDeposits: FixedDepositRecord[]
   loading: boolean
   error: string | null
   holdingsLoaded: boolean
   liabilitiesLoaded: boolean
   connectionsLoaded: boolean
   statementsLoaded: boolean
+  fixedDepositsLoaded: boolean
+}
+
+function getLoadingState(flags: {
+  holdingsLoaded: boolean
+  liabilitiesLoaded: boolean
+  connectionsLoaded: boolean
+  statementsLoaded: boolean
+  fixedDepositsLoaded: boolean
+}) {
+  return !(
+    flags.holdingsLoaded &&
+    flags.liabilitiesLoaded &&
+    flags.connectionsLoaded &&
+    flags.statementsLoaded &&
+    flags.fixedDepositsLoaded
+  )
 }
 
 export function useDashboardRealtime(userId?: string | null): RealtimeState {
@@ -27,12 +46,14 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
     connections: [],
     liabilities: [],
     statements: [],
+    fixedDeposits: [],
     loading: true,
     error: null,
     holdingsLoaded: false,
     liabilitiesLoaded: false,
     connectionsLoaded: false,
     statementsLoaded: false,
+    fixedDepositsLoaded: false,
   })
 
   useEffect(() => {
@@ -42,12 +63,14 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
         connections: [],
         liabilities: [],
         statements: [],
+        fixedDeposits: [],
         loading: false,
         error: null,
         holdingsLoaded: false,
         liabilitiesLoaded: false,
         connectionsLoaded: false,
         statementsLoaded: false,
+        fixedDepositsLoaded: false,
       })
       return
     }
@@ -57,12 +80,14 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
       connections: [],
       liabilities: [],
       statements: [],
+      fixedDeposits: [],
       loading: true,
       error: null,
       holdingsLoaded: false,
       liabilitiesLoaded: false,
       connectionsLoaded: false,
       statementsLoaded: false,
+      fixedDepositsLoaded: false,
     })
 
     const holdingsQuery = query(
@@ -82,17 +107,7 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
       orderBy('createdAt', 'desc')
     )
 
-    const getLoading = (
-      holdingsLoaded: boolean,
-      liabilitiesLoaded: boolean,
-      connectionsLoaded: boolean,
-      statementsLoaded: boolean
-    ) => !(
-      holdingsLoaded &&
-      liabilitiesLoaded &&
-      connectionsLoaded &&
-      statementsLoaded
-    )
+    const fixedDepositsQuery = collection(db, 'users', userId, 'fixed_deposits')
 
     const unsubHoldings = onSnapshot(
       holdingsQuery,
@@ -107,12 +122,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
             ...current,
             holdings,
             holdingsLoaded: true,
-            loading: getLoading(
-              true,
-              current.liabilitiesLoaded,
-              current.connectionsLoaded,
-              current.statementsLoaded
-            ),
+            loading: getLoadingState({
+              holdingsLoaded: true,
+              liabilitiesLoaded: current.liabilitiesLoaded,
+              connectionsLoaded: current.connectionsLoaded,
+              statementsLoaded: current.statementsLoaded,
+              fixedDepositsLoaded: current.fixedDepositsLoaded,
+            }),
             error: current.error,
           }
         })
@@ -123,12 +139,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
           ...current,
           holdings: [],
           holdingsLoaded: true,
-          loading: getLoading(
-            true,
-            current.liabilitiesLoaded,
-            current.connectionsLoaded,
-            current.statementsLoaded
-          ),
+          loading: getLoadingState({
+            holdingsLoaded: true,
+            liabilitiesLoaded: current.liabilitiesLoaded,
+            connectionsLoaded: current.connectionsLoaded,
+            statementsLoaded: current.statementsLoaded,
+            fixedDepositsLoaded: current.fixedDepositsLoaded,
+          }),
           error: current.error ?? 'Failed to load holdings from Firebase.',
         }))
       }
@@ -139,20 +156,21 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
       (snapshot) => {
         setState((current) => {
           const connections = snapshot.docs.map((doc) => ({
-            provider: doc.id as ConnectionRecord['provider'],
-            ...(doc.data() as Omit<ConnectionRecord, 'provider'>),
-          }))
+            id: doc.id,
+            ...(doc.data() as Omit<ConnectionRecord, 'id'>),
+          })) as ConnectionRecord[]
 
           return {
             ...current,
             connections,
             connectionsLoaded: true,
-            loading: getLoading(
-              current.holdingsLoaded,
-              current.liabilitiesLoaded,
-              true,
-              current.statementsLoaded
-            ),
+            loading: getLoadingState({
+              holdingsLoaded: current.holdingsLoaded,
+              liabilitiesLoaded: current.liabilitiesLoaded,
+              connectionsLoaded: true,
+              statementsLoaded: current.statementsLoaded,
+              fixedDepositsLoaded: current.fixedDepositsLoaded,
+            }),
             error: current.error,
           }
         })
@@ -163,12 +181,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
           ...current,
           connections: [],
           connectionsLoaded: true,
-          loading: getLoading(
-            current.holdingsLoaded,
-            current.liabilitiesLoaded,
-            true,
-            current.statementsLoaded
-          ),
+          loading: getLoadingState({
+            holdingsLoaded: current.holdingsLoaded,
+            liabilitiesLoaded: current.liabilitiesLoaded,
+            connectionsLoaded: true,
+            statementsLoaded: current.statementsLoaded,
+            fixedDepositsLoaded: current.fixedDepositsLoaded,
+          }),
           error: current.error ?? 'Failed to load connections from Firebase.',
         }))
       }
@@ -187,12 +206,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
             ...current,
             liabilities,
             liabilitiesLoaded: true,
-            loading: getLoading(
-              current.holdingsLoaded,
-              true,
-              current.connectionsLoaded,
-              current.statementsLoaded
-            ),
+            loading: getLoadingState({
+              holdingsLoaded: current.holdingsLoaded,
+              liabilitiesLoaded: true,
+              connectionsLoaded: current.connectionsLoaded,
+              statementsLoaded: current.statementsLoaded,
+              fixedDepositsLoaded: current.fixedDepositsLoaded,
+            }),
             error: current.error,
           }
         })
@@ -203,12 +223,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
           ...current,
           liabilities: [],
           liabilitiesLoaded: true,
-          loading: getLoading(
-            current.holdingsLoaded,
-            true,
-            current.connectionsLoaded,
-            current.statementsLoaded
-          ),
+          loading: getLoadingState({
+            holdingsLoaded: current.holdingsLoaded,
+            liabilitiesLoaded: true,
+            connectionsLoaded: current.connectionsLoaded,
+            statementsLoaded: current.statementsLoaded,
+            fixedDepositsLoaded: current.fixedDepositsLoaded,
+          }),
           error: current.error ?? 'Failed to load liabilities from Firebase.',
         }))
       }
@@ -227,12 +248,13 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
             ...current,
             statements,
             statementsLoaded: true,
-            loading: getLoading(
-              current.holdingsLoaded,
-              current.liabilitiesLoaded,
-              current.connectionsLoaded,
-              true
-            ),
+            loading: getLoadingState({
+              holdingsLoaded: current.holdingsLoaded,
+              liabilitiesLoaded: current.liabilitiesLoaded,
+              connectionsLoaded: current.connectionsLoaded,
+              statementsLoaded: true,
+              fixedDepositsLoaded: current.fixedDepositsLoaded,
+            }),
             error: current.error,
           }
         })
@@ -243,13 +265,65 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
           ...current,
           statements: [],
           statementsLoaded: true,
-          loading: getLoading(
-            current.holdingsLoaded,
-            current.liabilitiesLoaded,
-            current.connectionsLoaded,
-            true
-          ),
+          loading: getLoadingState({
+            holdingsLoaded: current.holdingsLoaded,
+            liabilitiesLoaded: current.liabilitiesLoaded,
+            connectionsLoaded: current.connectionsLoaded,
+            statementsLoaded: true,
+            fixedDepositsLoaded: current.fixedDepositsLoaded,
+          }),
           error: current.error ?? 'Failed to load statements from Firebase.',
+        }))
+      }
+    )
+
+    const unsubFixedDeposits = onSnapshot(
+      fixedDepositsQuery,
+      (snapshot) => {
+        setState((current) => {
+          const fixedDeposits = snapshot.docs
+            .map((doc) => ({
+              id: doc.id,
+              ...(doc.data() as Omit<FixedDepositRecord, 'id'>),
+            }))
+            .sort((a, b) => {
+              const aTime = new Date(String(a.updatedAt ?? a.createdAt ?? 0)).getTime() || 0
+              const bTime = new Date(String(b.updatedAt ?? b.createdAt ?? 0)).getTime() || 0
+              return bTime - aTime
+            })
+
+          return {
+            ...current,
+            fixedDeposits,
+            fixedDepositsLoaded: true,
+            loading: getLoadingState({
+              holdingsLoaded: current.holdingsLoaded,
+              liabilitiesLoaded: current.liabilitiesLoaded,
+              connectionsLoaded: current.connectionsLoaded,
+              statementsLoaded: current.statementsLoaded,
+              fixedDepositsLoaded: true,
+            }),
+            error:
+              current.error === 'Failed to load fixed deposits from Firebase.'
+                ? null
+                : current.error,
+          }
+        })
+      },
+      (error) => {
+        console.error('Fixed deposits snapshot error', error)
+        setState((current) => ({
+          ...current,
+          fixedDeposits: [],
+          fixedDepositsLoaded: true,
+          loading: getLoadingState({
+            holdingsLoaded: current.holdingsLoaded,
+            liabilitiesLoaded: current.liabilitiesLoaded,
+            connectionsLoaded: current.connectionsLoaded,
+            statementsLoaded: current.statementsLoaded,
+            fixedDepositsLoaded: true,
+          }),
+          error: current.error ?? 'Failed to load fixed deposits from Firebase.',
         }))
       }
     )
@@ -259,6 +333,7 @@ export function useDashboardRealtime(userId?: string | null): RealtimeState {
       unsubConnections()
       unsubLiabilities()
       unsubStatements()
+      unsubFixedDeposits()
     }
   }, [userId])
 
