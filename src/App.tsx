@@ -146,6 +146,33 @@ export default function App() {
     )
   }, [baseAssetsForTable, searchTerm])
 
+  const statementsForTable = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase()
+    if (!q) return statements
+
+    return statements.filter((statement) => {
+      const totalDue = statement.statementSummary?.totalDue
+      const minimumDue = statement.statementSummary?.minimumDue
+
+      return [
+        statement.provider,
+        statement.subject,
+        statement.from,
+        statement.snippet,
+        statement.attachmentName,
+        ...(statement.attachmentNames ?? []),
+        statement.statementSummary?.dueDate,
+        statement.paymentStatus,
+        totalDue != null ? String(totalDue) : '',
+        minimumDue != null ? String(minimumDue) : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    })
+  }, [statements, searchTerm])
+
   const totals = useMemo(() => {
     const totalAssetsInInr = resolvedAssets.reduce(
       (sum, item) => sum + convertCurrency(item.value, item.currency, 'INR', usdInr),
@@ -318,8 +345,7 @@ export default function App() {
             />
             <KpiCard
               label="Statements"
-              valueNumber={statements.length}
-              currency={displayCurrency}
+              value={String(statements.length)}
               delta={statementsLoaded ? 'Realtime Gmail index' : 'Loading...'}
               tone="neutral"
             />
@@ -381,7 +407,7 @@ export default function App() {
 
           <section id="section-statements">
             <StatementsList
-              statements={statements}
+              statements={statementsForTable}
               loading={!statementsLoaded}
             />
           </section>

@@ -100,3 +100,17 @@ export async function uploadIndmoneyReports(
 
   return res.json()
 }
+
+export async function markStatementPaid(statementId: string) {
+  const data = await authorizedFetch(`/api/statements/${statementId}/mark-paid`, {
+    method: 'POST',
+  })
+  return data as { ok: true; liabilitiesImported: number }
+}
+
+export async function markStatementUnpaid(statementId: string) {
+  const data = await authorizedFetch(`/api/statements/${statementId}/mark-unpaid`, {
+    method: 'POST',
+  })
+  return data as { ok: true; liabilitiesImported: number }
+}

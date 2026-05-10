@@ -70,7 +70,13 @@ export interface StatementRecord {
   }
   createdAt?: unknown
   updatedAt?: unknown
+  paymentStatus?: 'unpaid' | 'paid' | 'partial'
+  paidAmount?: number
+  paidAt?: unknown
+  manuallyMarkedPaid?: boolean
+  currency?: 'INR' | 'USD' | string
 }
+
 
 export interface ConnectionRecord {
   provider: ProviderType

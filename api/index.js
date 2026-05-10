@@ -627,9 +627,9 @@ app.get('/api/zerodha/holdings', authMiddleware, async (req, res) => {
           userId: uid,
           instrumentId: String(
             mf.tradingsymbol ??
-              mf.folio ??
-              mf.fund ??
-              crypto.randomUUID()
+            mf.folio ??
+            mf.fund ??
+            crypto.randomUUID()
           ),
           instrumentToken: null,
           folio: mf.folio ?? null,
@@ -692,6 +692,221 @@ app.get('/api/zerodha/holdings', authMiddleware, async (req, res) => {
     return res.status(500).json({ error: 'Failed to fetch holdings' })
   }
 })
+
+
+function normalizeProviderKey(provider = '') {
+  return String(provider).toLowerCase().replace(/[^a-z0-9]+/g, '-')
+}
+
+function getHeader(headers = [], name) {
+  return (
+    headers.find(
+      (header) => String(header.name).toLowerCase() === name.toLowerCase()
+    )?.value || ''
+  )
+}
+
+function collectAttachments(parts = [], acc = []) {
+  for (const part of parts || []) {
+    if (part.filename && part.body?.attachmentId) {
+      acc.push({
+        filename: part.filename,
+        mimeType: part.mimeType || 'application/octet-stream',
+        attachmentId: part.body.attachmentId,
+        size: part.body.size || 0,
+      })
+    }
+
+    if (part.parts?.length) {
+      collectAttachments(part.parts, acc)
+    }
+  }
+
+  return acc
+}
+
+function inferStatementProvider(subject = '', from = '', filename = '') {
+  const text = `${subject} ${from} ${filename}`.toLowerCase()
+
+  if (text.includes('hdfc')) return 'HDFC Bank'
+  if (text.includes('american express') || text.includes('amex')) return 'American Express'
+  if (text.includes('icici')) return 'ICICI Bank'
+  if (text.includes('sbi card') || text.includes('sbi cards') || text.includes('sbicard')) return 'SBI Card'
+  if (text.includes('axis')) return 'Axis Bank'
+  if (text.includes('indusind')) return 'IndusInd Bank'
+  if (text.includes('kotak')) return 'Kotak Mahindra Bank'
+  if (text.includes('idfc')) return 'IDFC First Bank'
+  if (text.includes('standard chartered')) return 'Standard Chartered'
+  if (text.includes('hsbc')) return 'HSBC'
+  if (text.includes('yes bank')) return 'Yes Bank'
+  if (text.includes('rbl')) return 'RBL Bank'
+  if (text.includes('onecard') || text.includes('one card')) return 'OneCard'
+  if (text.includes('au small finance')) return 'AU Bank'
+
+  return 'Unknown Provider'
+}
+
+function looksLikeCreditCardStatement({ subject = '', from = '', snippet = '', attachmentNames = [] }) {
+  const haystack = `${subject} ${from} ${snippet} ${attachmentNames.join(' ')}`.toLowerCase()
+
+  const positiveSignals = [
+    'credit card',
+    'card statement',
+    'statement of account',
+    'monthly statement',
+    'total amount due',
+    'minimum amount due',
+    'payment due',
+    'amount due',
+    'credit card statement',
+    'card ending',
+    'xxxx',
+    'statement',
+  ]
+
+  const negativeSignals = [
+    'debit card',
+    'savings account',
+    'current account',
+    'bank statement',
+    'transaction alert',
+    'upi',
+    'imps',
+    'neft',
+    'rtgs',
+    'cash withdrawal',
+    'salary',
+    'credited',
+    'debited',
+    'utr',
+    'avl bal',
+    'available balance',
+    'loan statement',
+    'mutual fund',
+    'demat',
+    'brokerage',
+  ]
+
+  const positiveCount = positiveSignals.filter((signal) => haystack.includes(signal)).length
+  const hasNegative = negativeSignals.some((signal) => haystack.includes(signal))
+
+  return positiveCount >= 2 && !hasNegative
+}
+
+function extractStatementSummary(text = '') {
+  const normalized = text.replace(/\s+/g, ' ')
+  const dueDateMatch =
+    normalized.match(/due date[:\s-]*([A-Za-z0-9,\-/ ]{6,24})/i) ||
+    normalized.match(/payment due[:\s-]*([A-Za-z0-9,\-/ ]{6,24})/i)
+
+  const totalDueMatch =
+    normalized.match(/total amount due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i) ||
+    normalized.match(/amount due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i) ||
+    normalized.match(/total due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i)
+
+  const minimumDueMatch =
+    normalized.match(/minimum amount due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i) ||
+    normalized.match(/minimum due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i)
+
+  const parseAmount = (value) =>
+    value ? Number(String(value).replace(/,/g, '')) : undefined
+
+  return {
+    dueDate: dueDateMatch?.[1]?.trim(),
+    totalDue: parseAmount(totalDueMatch?.[1]),
+    minimumDue: parseAmount(minimumDueMatch?.[1]),
+  }
+}
+
+async function listAllMatchingMessages(gmail, query) {
+  const allMessages = []
+  let pageToken = undefined
+
+  do {
+    const response = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults: 100,
+      pageToken,
+      includeSpamTrash: false,
+    })
+
+    const messages = response.data.messages || []
+    allMessages.push(...messages)
+    pageToken = response.data.nextPageToken || undefined
+  } while (pageToken)
+
+  return allMessages
+}
+
+async function rebuildLiabilitiesFromStatements(uid) {
+  const statementsRef = db.collection('users').doc(uid).collection('statements')
+  const liabilitiesRef = db.collection('users').doc(uid).collection('liabilities')
+
+  const statementsSnap = await statementsRef.where('type', '==', 'credit_card').get()
+  const batch = db.batch()
+  const liabilityMap = new Map()
+
+  for (const doc of statementsSnap.docs) {
+    const data = doc.data() || {}
+    const provider = data.provider || 'Unknown Provider'
+    const paymentStatus = data.paymentStatus || 'unpaid'
+    const totalDue = Number(data?.statementSummary?.totalDue || 0)
+    const paidAmount = Number(data.paidAmount || 0)
+    const dueDate = data?.statementSummary?.dueDate || ''
+    const currency = data.currency || 'INR'
+
+    if (!totalDue || provider === 'Unknown Provider') continue
+
+    const outstanding =
+      paymentStatus === 'paid'
+        ? 0
+        : paymentStatus === 'partial'
+          ? Math.max(0, totalDue - paidAmount)
+          : totalDue
+
+    if (outstanding <= 0) continue
+
+    const key = normalizeProviderKey(provider)
+    const existing = liabilityMap.get(key) || {
+      userId: uid,
+      type: 'credit_card',
+      provider,
+      accountNumberMasked: '',
+      currentOutstanding: 0,
+      dueAmount: 0,
+      dueDate,
+      utilization: 0,
+      source: 'gmail',
+      currency,
+      statementIds: [],
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }
+
+    existing.currentOutstanding += outstanding
+    existing.dueAmount += outstanding
+    existing.statementIds.push(doc.id)
+    if (!existing.dueDate || (dueDate && String(dueDate) < String(existing.dueDate))) {
+      existing.dueDate = dueDate
+    }
+
+    liabilityMap.set(key, existing)
+  }
+
+  const existingLiabilitiesSnap = await liabilitiesRef.where('source', '==', 'gmail').get()
+  for (const doc of existingLiabilitiesSnap.docs) {
+    if (!liabilityMap.has(doc.id)) {
+      batch.delete(doc.ref)
+    }
+  }
+
+  for (const [id, payload] of liabilityMap.entries()) {
+    batch.set(liabilitiesRef.doc(id), payload, { merge: true })
+  }
+
+  await batch.commit()
+  return { liabilitiesImported: liabilityMap.size }
+}
 
 app.get('/api/gmail/login', authMiddleware, async (req, res) => {
   try {
@@ -834,7 +1049,7 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
       status: 'syncing',
       accountLabel: 'Gmail',
       metadata: {
-        description: 'Scanning Gmail for statement emails',
+        description: 'Scanning Gmail for credit card statements',
         phase: 'auth-check',
       },
     })
@@ -874,106 +1089,26 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
       status: 'syncing',
       accountLabel: 'Gmail',
       metadata: {
-        description: 'Scanning Gmail for statement emails',
+        description: 'Scanning Gmail for credit card statements',
         phase: 'searching',
       },
     })
 
     const query =
-      'has:attachment (filename:pdf OR filename:xls OR filename:xlsx) (statement OR bill OR due OR outstanding OR card) newer_than:120d'
+      'in:anywhere has:attachment subject:("credit card" OR "card statement" OR estatement OR e-statement OR "monthly statement") -in:spam -in:trash newer_than:365d'
 
-    const listRes = await gmail.users.messages.list({
-      userId: 'me',
-      q: query,
-      maxResults: 50,
-    })
+    const messageRefs = await listAllMatchingMessages(gmail, query)
+    const statementsRef = db.collection('users').doc(uid).collection('statements')
 
-    const messageRefs = listRes.data.messages || []
-    const statementsRef = db
-      .collection('users')
-      .doc(uid)
-      .collection('statements')
-
-    const liabilitiesRef = db
-      .collection('users')
-      .doc(uid)
-      .collection('liabilities')
-
+    let scanned = 0
     let imported = 0
-    let liabilitiesImported = 0
+    let skipped = 0
 
-    function inferProvider(subject = '', from = '', filename = '') {
-      const text = `${subject} ${from} ${filename}`.toLowerCase()
-
-      if (text.includes('hdfc')) return 'HDFC Bank'
-      if (text.includes('american express') || text.includes('amex')) return 'American Express'
-      if (text.includes('icici')) return 'ICICI Bank'
-      if (text.includes('sbi')) return 'SBI Card'
-      if (text.includes('axis')) return 'Axis Bank'
-      if (text.includes('indusind')) return 'IndusInd Bank'
-      if (text.includes('kotak')) return 'Kotak Mahindra Bank'
-      if (text.includes('idfc')) return 'IDFC First Bank'
-      if (text.includes('standard chartered')) return 'Standard Chartered'
-      if (text.includes('hsbc')) return 'HSBC'
-      if (text.includes('yes bank')) return 'Yes Bank'
-      if (text.includes('rbl')) return 'RBL Bank'
-
-      return 'Unknown Provider'
-    }
-
-    function getHeader(headers = [], name) {
-      return (
-        headers.find(
-          (header) => String(header.name).toLowerCase() === name.toLowerCase()
-        )?.value || ''
-      )
-    }
-
-    function collectAttachments(parts = [], acc = []) {
-      for (const part of parts || []) {
-        if (part.filename && part.body?.attachmentId) {
-          acc.push({
-            filename: part.filename,
-            mimeType: part.mimeType || 'application/octet-stream',
-            attachmentId: part.body.attachmentId,
-            size: part.body.size || 0,
-          })
-        }
-
-        if (part.parts?.length) {
-          collectAttachments(part.parts, acc)
-        }
-      }
-
-      return acc
-    }
-
-    function extractStatementSummary(text = '') {
-      const normalized = text.replace(/\s+/g, ' ')
-      const dueDateMatch =
-        normalized.match(/due date[:\s-]*([A-Za-z0-9,\-/ ]{6,24})/i) ||
-        normalized.match(/payment due[:\s-]*([A-Za-z0-9,\-/ ]{6,24})/i)
-
-      const totalDueMatch =
-        normalized.match(/total amount due[:\s-]*₹?\s?([0-9,]+(?:\.\d{1,2})?)/i) ||
-        normalized.match(/amount due[:\s-]*₹?\s?([0-9,]+(?:\.\d{1,2})?)/i) ||
-        normalized.match(/total due[:\s-]*₹?\s?([0-9,]+(?:\.\d{1,2})?)/i)
-
-      const minimumDueMatch =
-        normalized.match(/minimum amount due[:\s-]*₹?\s?([0-9,]+(?:\.\d{1,2})?)/i) ||
-        normalized.match(/minimum due[:\s-]*₹?\s?([0-9,]+(?:\.\d{1,2})?)/i)
-
-      const parseAmount = (value) =>
-        value ? Number(String(value).replace(/,/g, '')) : undefined
-
-      return {
-        dueDate: dueDateMatch?.[1]?.trim(),
-        totalDue: parseAmount(totalDueMatch?.[1]),
-        minimumDue: parseAmount(minimumDueMatch?.[1]),
-      }
-    }
+    const matchedStatementIds = new Set()
 
     for (const ref of messageRefs) {
+      scanned += 1
+
       const msg = await gmail.users.messages.get({
         userId: 'me',
         id: ref.id,
@@ -985,12 +1120,29 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
       const subject = getHeader(headers, 'Subject')
       const from = getHeader(headers, 'From')
       const internalDateMs = Number(msg.data.internalDate || Date.now())
-
       const attachments = collectAttachments(payload.parts || [])
       const attachmentNames = attachments.map((item) => item.filename)
-      const provider = inferProvider(subject, from, attachmentNames.join(' '))
       const snippet = msg.data.snippet || ''
+
+      const normalizedSubject = String(subject || '').toLowerCase()
+
+      const subjectLooksLikeCardStatement =
+        normalizedSubject.includes('credit card') ||
+        normalizedSubject.includes('card statement') ||
+        normalizedSubject.includes('e-statement') ||
+        normalizedSubject.includes('estatement') ||
+        normalizedSubject.includes('monthly statement')
+
+      if (!subjectLooksLikeCardStatement) {
+        skipped += 1
+        continue
+      }
+
+      const provider = inferStatementProvider(subject, from, attachmentNames.join(' '))
       const summary = extractStatementSummary(`${subject} ${snippet}`)
+      const statementRef = statementsRef.doc(msg.data.id)
+      const existingStatement = await statementRef.get()
+      const existingData = existingStatement.data() || {}
 
       const statementDoc = {
         userId: uid,
@@ -1010,47 +1162,46 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
           dueDate: summary.dueDate,
           transactionCount: undefined,
         },
+        paymentStatus: existingData.paymentStatus || 'unpaid',
+        paidAmount: Number(existingData.paidAmount || 0),
+        paidAt: existingData.paidAt || null,
+        manuallyMarkedPaid: Boolean(existingData.manuallyMarkedPaid || false),
         hasAttachments: attachments.length > 0,
         attachmentCount: attachments.length,
         createdAt: admin.firestore.Timestamp.fromMillis(internalDateMs),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         source: 'gmail',
+        currency: 'INR',
       }
 
-      await statementsRef.doc(msg.data.id).set(statementDoc, { merge: true })
+      matchedStatementIds.add(msg.data.id)
+      await statementRef.set(statementDoc, { merge: true })
       imported += 1
+    }
+    const existingStatementsSnap = await statementsRef
+      .where('source', '==', 'gmail')
+      .get()
 
-      if (provider !== 'Unknown Provider' && summary.totalDue) {
-        const liabilityId = provider.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    const cleanupBatch = db.batch()
 
-        await liabilitiesRef.doc(liabilityId).set(
-          {
-            userId: uid,
-            type: 'credit_card',
-            provider,
-            accountNumberMasked: '',
-            currentOutstanding: summary.totalDue,
-            dueAmount: summary.totalDue,
-            dueDate: summary.dueDate || '',
-            utilization: 0,
-            source: 'gmail',
-            sourceMessageId: msg.data.id,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        )
-
-        liabilitiesImported += 1
+    for (const doc of existingStatementsSnap.docs) {
+      if (!matchedStatementIds.has(doc.id)) {
+        cleanupBatch.delete(doc.ref)
       }
     }
+
+    await cleanupBatch.commit()
+    const { liabilitiesImported } = await rebuildLiabilitiesFromStatements(uid)
 
     await upsertConnection(uid, 'gmail', {
       status: 'connected',
       lastSyncAt: admin.firestore.FieldValue.serverTimestamp(),
       accountLabel: 'Gmail',
       metadata: {
-        description: `Imported ${imported} statement emails`,
+        description: `Imported ${imported} credit card statement emails`,
         phase: 'completed',
+        scanned,
+        skipped,
         statementsImported: imported,
         liabilitiesImported,
         query,
@@ -1060,7 +1211,8 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
     return res.json({
       imported,
       liabilitiesImported,
-      messages: messageRefs.length,
+      messages: scanned,
+      skipped,
     })
   } catch (error) {
     console.error('Gmail statements sync error', error)
@@ -1075,6 +1227,69 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
     })
 
     return res.status(500).json({ error: 'Failed to sync Gmail statements' })
+  }
+})
+
+app.post('/api/statements/:id/mark-paid', authMiddleware, async (req, res) => {
+  try {
+    const uid = req.user.uid
+    const statementId = String(req.params.id)
+    const statementRef = db.collection('users').doc(uid).collection('statements').doc(statementId)
+    const snapshot = await statementRef.get()
+
+    if (!snapshot.exists) {
+      return res.status(404).json({ error: 'Statement not found' })
+    }
+
+    const data = snapshot.data() || {}
+    const totalDue = Number(data?.statementSummary?.totalDue || 0)
+
+    await statementRef.set(
+      {
+        paymentStatus: 'paid',
+        paidAmount: totalDue,
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+        manuallyMarkedPaid: true,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    )
+
+    const rebuild = await rebuildLiabilitiesFromStatements(uid)
+    return res.json({ ok: true, ...rebuild })
+  } catch (error) {
+    console.error('Mark paid failed', error)
+    return res.status(500).json({ error: 'Failed to mark statement paid' })
+  }
+})
+
+app.post('/api/statements/:id/mark-unpaid', authMiddleware, async (req, res) => {
+  try {
+    const uid = req.user.uid
+    const statementId = String(req.params.id)
+    const statementRef = db.collection('users').doc(uid).collection('statements').doc(statementId)
+    const snapshot = await statementRef.get()
+
+    if (!snapshot.exists) {
+      return res.status(404).json({ error: 'Statement not found' })
+    }
+
+    await statementRef.set(
+      {
+        paymentStatus: 'unpaid',
+        paidAmount: 0,
+        paidAt: null,
+        manuallyMarkedPaid: false,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    )
+
+    const rebuild = await rebuildLiabilitiesFromStatements(uid)
+    return res.json({ ok: true, ...rebuild })
+  } catch (error) {
+    console.error('Mark unpaid failed', error)
+    return res.status(500).json({ error: 'Failed to mark statement unpaid' })
   }
 })
 
@@ -1295,8 +1510,8 @@ app.post(
               null,
             brokerAccount: String(
               holdingsData.metadata['Broker Account'] ||
-                ordersData.metadata['Broker Account'] ||
-                ''
+              ordersData.metadata['Broker Account'] ||
+              ''
             ),
             holdingsAsOn: holdingsData.metadata['Holdings as on'] || null,
             periodFrom: ordersData.metadata['Period From'] || null,
@@ -1318,8 +1533,8 @@ app.post(
           null,
         brokerAccount: String(
           holdingsData.metadata['Broker Account'] ||
-            ordersData.metadata['Broker Account'] ||
-            ''
+          ordersData.metadata['Broker Account'] ||
+          ''
         ),
       })
     } catch (error) {
