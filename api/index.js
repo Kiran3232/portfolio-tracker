@@ -56,7 +56,7 @@ const upload = multer({ storage: multer.memoryStorage() })
 
 app.use(
   cors({
-    origin: ['http://localhost:5173'],
+    origin: ['http://localhost:5173', 'https://portfolio-tracker-3232.web.app'],
     credentials: true,
   })
 )
