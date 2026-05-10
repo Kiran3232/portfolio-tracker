@@ -13,9 +13,31 @@ import xlsx from 'xlsx'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const serviceAccount = JSON.parse(
-  fs.readFileSync(path.join(__dirname, 'serviceAccountKey.json'), 'utf8')
-)
+function loadFirebaseServiceAccount() {
+  const rawJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+
+  if (rawJson) {
+    try {
+      return JSON.parse(rawJson)
+    } catch (error) {
+      throw new Error(
+        `Invalid FIREBASE_SERVICE_ACCOUNT_JSON: ${error instanceof Error ? error.message : 'JSON parse failed'}`
+      )
+    }
+  }
+
+  const filePath = path.join(__dirname, 'serviceAccountKey.json')
+
+  if (fs.existsSync(filePath)) {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+  }
+
+  throw new Error(
+    'Missing Firebase credentials. Set FIREBASE_SERVICE_ACCOUNT_JSON in production or add serviceAccountKey.json locally.'
+  )
+}
+
+const serviceAccount = loadFirebaseServiceAccount()
 
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -413,51 +435,7 @@ app.get('/api/zerodha/callback', async (req, res) => {
       },
     })
 
-    return res.send(`
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>Zerodha Connected</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              background: #0f172a;
-              color: #e2e8f0;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              min-height: 100vh;
-              margin: 0;
-            }
-            .card {
-              background: #111827;
-              border: 1px solid #334155;
-              border-radius: 12px;
-              padding: 24px;
-              max-width: 520px;
-              box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-            }
-            h1 { margin-top: 0; font-size: 24px; }
-            p { line-height: 1.6; color: #cbd5e1; }
-            code {
-              background: #1e293b;
-              padding: 2px 6px;
-              border-radius: 6px;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <h1>Zerodha connected successfully</h1>
-            <p>Your access token was created and stored by the backend.</p>
-            <p>You can close this tab and return to your app.</p>
-            <p><code>User ID: ${session.user_id || 'unknown'}</code></p>
-          </div>
-        </body>
-      </html>
-    `)
+    return res.send(`<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Zerodha Connected</title><style>body{font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.card{background:#111827;border:1px solid #334155;border-radius:12px;padding:24px;max-width:520px;box-shadow:0 10px 30px rgba(0,0,0,.35)}h1{margin-top:0;font-size:24px}p{line-height:1.6;color:#cbd5e1}code{background:#1e293b;padding:2px 6px;border-radius:6px}</style></head><body><div class="card"><h1>Zerodha connected successfully</h1><p>Your access token was created and stored by the backend.</p><p>You can close this tab and return to your app.</p><p><code>User ID: ${session.user_id || 'unknown'}</code></p></div></body></html>`)
   } catch (error) {
     console.error('Zerodha callback error', error)
 
@@ -521,24 +499,17 @@ app.get('/api/zerodha/holdings', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Missing Zerodha access token' })
     }
 
-    const userHoldingsRef = db
-      .collection('users')
-      .doc(uid)
-      .collection('holdings')
-
+    const userHoldingsRef = db.collection('users').doc(uid).collection('holdings')
     const batch = db.batch()
     const allNormalizedHoldings = []
 
-    const holdingsRes = await fetch(
-      'https://api.kite.trade/portfolio/holdings',
-      {
-        method: 'GET',
-        headers: {
-          Authorization: `token ${ZERODHA_API_KEY}:${accessToken}`,
-          'X-Kite-Version': '3',
-        },
-      }
-    )
+    const holdingsRes = await fetch('https://api.kite.trade/portfolio/holdings', {
+      method: 'GET',
+      headers: {
+        Authorization: `token ${ZERODHA_API_KEY}:${accessToken}`,
+        'X-Kite-Version': '3',
+      },
+    })
 
     const holdingsData = await holdingsRes.json()
 
@@ -553,27 +524,16 @@ app.get('/api/zerodha/holdings', authMiddleware, async (req, res) => {
         },
       })
 
-      return res
-        .status(400)
-        .json({ error: 'Failed to fetch holdings', details: holdingsData })
+      return res.status(400).json({ error: 'Failed to fetch holdings', details: holdingsData })
     }
 
-    const equityHoldings = holdingsData.data || []
-
-    for (const h of equityHoldings) {
+    for (const h of holdingsData.data || []) {
       const quantity = Number(h.quantity ?? 0)
       const avgBuyPrice = Number(h.average_price ?? 0)
       const currentPrice = Number(h.last_price ?? 0)
-      const currentValue =
-        Number(h.current_value ?? 0) || quantity * currentPrice || 0
-
+      const currentValue = Number(h.current_value ?? 0) || quantity * currentPrice || 0
       const uiType = inferAssetType(h)
-      const normalizedType =
-        uiType === 'ETF'
-          ? 'etf'
-          : uiType === 'Bond'
-            ? 'etf'
-            : 'stock'
+      const normalizedType = uiType === 'ETF' ? 'etf' : uiType === 'Bond' ? 'etf' : 'stock'
 
       const norm = {
         userId: uid,
@@ -615,9 +575,7 @@ app.get('/api/zerodha/holdings', authMiddleware, async (req, res) => {
     const mfData = await mfHoldingsRes.json()
 
     if (mfData.status === 'success') {
-      const mfHoldings = mfData.data || []
-
-      for (const mf of mfHoldings) {
+      for (const mf of mfData.data || []) {
         const avgBuyPrice = Number(mf.average_price ?? 0)
         const currentPrice = Number(mf.last_price ?? 0)
         const quantity = Number(mf.quantity ?? 0)
@@ -625,12 +583,7 @@ app.get('/api/zerodha/holdings', authMiddleware, async (req, res) => {
 
         const norm = {
           userId: uid,
-          instrumentId: String(
-            mf.tradingsymbol ??
-            mf.folio ??
-            mf.fund ??
-            crypto.randomUUID()
-          ),
+          instrumentId: String(mf.tradingsymbol ?? mf.folio ?? mf.fund ?? crypto.randomUUID()),
           instrumentToken: null,
           folio: mf.folio ?? null,
           schemeCode: null,
@@ -654,12 +607,9 @@ app.get('/api/zerodha/holdings', authMiddleware, async (req, res) => {
         }
 
         const docId = String(mf.tradingsymbol ?? mf.folio ?? mf.fund)
-
         batch.set(userHoldingsRef.doc(docId), norm, { merge: true })
         allNormalizedHoldings.push(norm)
       }
-    } else {
-      console.warn('MF holdings fetch returned non-success status', mfData)
     }
 
     await batch.commit()
@@ -674,10 +624,7 @@ app.get('/api/zerodha/holdings', authMiddleware, async (req, res) => {
       },
     })
 
-    return res.json({
-      imported: allNormalizedHoldings.length,
-      holdings: allNormalizedHoldings,
-    })
+    return res.json({ imported: allNormalizedHoldings.length, holdings: allNormalizedHoldings })
   } catch (error) {
     console.error('Holdings error', error)
 
@@ -698,11 +645,7 @@ function normalizeProviderKey(provider = '') {
 }
 
 function getHeader(headers = [], name) {
-  return (
-    headers.find(
-      (header) => String(header.name).toLowerCase() === name.toLowerCase()
-    )?.value || ''
-  )
+  return headers.find((header) => String(header.name).toLowerCase() === name.toLowerCase())?.value || ''
 }
 
 function collectAttachments(parts = [], acc = []) {
@@ -726,7 +669,6 @@ function collectAttachments(parts = [], acc = []) {
 
 function inferStatementProvider(subject = '', from = '', filename = '') {
   const text = `${subject} ${from} ${filename}`.toLowerCase()
-
   if (text.includes('hdfc')) return 'HDFC Bank'
   if (text.includes('american express') || text.includes('amex')) return 'American Express'
   if (text.includes('icici')) return 'ICICI Bank'
@@ -741,27 +683,15 @@ function inferStatementProvider(subject = '', from = '', filename = '') {
   if (text.includes('rbl')) return 'RBL Bank'
   if (text.includes('onecard') || text.includes('one card')) return 'OneCard'
   if (text.includes('au small finance')) return 'AU Bank'
-
   return 'Unknown Provider'
 }
 
 function extractStatementSummary(text = '') {
   const normalized = text.replace(/\s+/g, ' ')
-  const dueDateMatch =
-    normalized.match(/due date[:\s-]*([A-Za-z0-9,\-/ ]{6,24})/i) ||
-    normalized.match(/payment due[:\s-]*([A-Za-z0-9,\-/ ]{6,24})/i)
-
-  const totalDueMatch =
-    normalized.match(/total amount due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i) ||
-    normalized.match(/amount due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i) ||
-    normalized.match(/total due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i)
-
-  const minimumDueMatch =
-    normalized.match(/minimum amount due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i) ||
-    normalized.match(/minimum due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i)
-
-  const parseAmount = (value) =>
-    value ? Number(String(value).replace(/,/g, '')) : undefined
+  const dueDateMatch = normalized.match(/due date[:\s-]*([A-Za-z0-9,\-/ ]{6,24})/i) || normalized.match(/payment due[:\s-]*([A-Za-z0-9,\-/ ]{6,24})/i)
+  const totalDueMatch = normalized.match(/total amount due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i) || normalized.match(/amount due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i) || normalized.match(/total due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i)
+  const minimumDueMatch = normalized.match(/minimum amount due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i) || normalized.match(/minimum due[:\s-]*₹?\$?\s?([0-9,]+(?:\.\d{1,2})?)/i)
+  const parseAmount = (value) => value ? Number(String(value).replace(/,/g, '')) : undefined
 
   return {
     dueDate: dueDateMatch?.[1]?.trim(),
@@ -783,8 +713,7 @@ async function listAllMatchingMessages(gmail, query) {
       includeSpamTrash: false,
     })
 
-    const messages = response.data.messages || []
-    allMessages.push(...messages)
+    allMessages.push(...(response.data.messages || []))
     pageToken = response.data.nextPageToken || undefined
   } while (pageToken)
 
@@ -794,7 +723,6 @@ async function listAllMatchingMessages(gmail, query) {
 async function rebuildLiabilitiesFromStatements(uid) {
   const statementsRef = db.collection('users').doc(uid).collection('statements')
   const liabilitiesRef = db.collection('users').doc(uid).collection('liabilities')
-
   const statementsSnap = await statementsRef.where('type', '==', 'credit_card').get()
   const batch = db.batch()
   const liabilityMap = new Map()
@@ -810,13 +738,7 @@ async function rebuildLiabilitiesFromStatements(uid) {
 
     if (!totalDue || provider === 'Unknown Provider') continue
 
-    const outstanding =
-      paymentStatus === 'paid'
-        ? 0
-        : paymentStatus === 'partial'
-          ? Math.max(0, totalDue - paidAmount)
-          : totalDue
-
+    const outstanding = paymentStatus === 'paid' ? 0 : paymentStatus === 'partial' ? Math.max(0, totalDue - paidAmount) : totalDue
     if (outstanding <= 0) continue
 
     const key = normalizeProviderKey(provider)
@@ -847,9 +769,7 @@ async function rebuildLiabilitiesFromStatements(uid) {
 
   const existingLiabilitiesSnap = await liabilitiesRef.where('source', '==', 'gmail').get()
   for (const doc of existingLiabilitiesSnap.docs) {
-    if (!liabilityMap.has(doc.id)) {
-      batch.delete(doc.ref)
-    }
+    if (!liabilityMap.has(doc.id)) batch.delete(doc.ref)
   }
 
   for (const [id, payload] of liabilityMap.entries()) {
@@ -894,38 +814,29 @@ app.get('/api/gmail/callback', async (req, res) => {
     const code = String(req.query.code || '')
     const rawState = String(req.query.state || '')
 
-    if (!code) {
-      return res.status(400).send('Missing code')
-    }
-
+    if (!code) return res.status(400).send('Missing code')
     if (!rawState) {
-      return res
-        .status(400)
-        .send('Missing OAuth state. Please reconnect from the app.')
+      return res.status(400).send('Missing OAuth state. Please reconnect from the app.')
     }
 
     const consumed = await consumeOAuthState(rawState, 'gmail')
     uid = consumed.uid
+
     const client = getGmailOAuthClient()
     const { tokens } = await client.getToken(code)
 
-    await db
-      .collection('users')
-      .doc(uid)
-      .collection('provider_tokens')
-      .doc('gmail')
-      .set(
-        {
-          provider: 'gmail',
-          accessToken: tokens.access_token || null,
-          refreshToken: tokens.refresh_token || null,
-          scope: tokens.scope || null,
-          tokenType: tokens.token_type || null,
-          expiryDate: tokens.expiry_date || null,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      )
+    await db.collection('users').doc(uid).collection('provider_tokens').doc('gmail').set(
+      {
+        provider: 'gmail',
+        accessToken: tokens.access_token || null,
+        refreshToken: tokens.refresh_token || null,
+        scope: tokens.scope || null,
+        tokenType: tokens.token_type || null,
+        expiryDate: tokens.expiry_date || null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    )
 
     await upsertConnection(uid, 'gmail', {
       status: 'connected',
@@ -936,45 +847,7 @@ app.get('/api/gmail/callback', async (req, res) => {
       },
     })
 
-    return res.send(`
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>Gmail Connected</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              background: #0f172a;
-              color: #e2e8f0;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              min-height: 100vh;
-              margin: 0;
-            }
-            .card {
-              background: #111827;
-              border: 1px solid #334155;
-              border-radius: 12px;
-              padding: 24px;
-              max-width: 520px;
-              box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-            }
-            h1 { margin-top: 0; font-size: 24px; }
-            p { line-height: 1.6; color: #cbd5e1; }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <h1>Gmail connected successfully</h1>
-            <p>Your Gmail access token was stored by the backend.</p>
-            <p>You can close this tab and return to your app.</p>
-          </div>
-        </body>
-      </html>
-    `)
+    return res.send(`<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Gmail Connected</title><style>body{font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.card{background:#111827;border:1px solid #334155;border-radius:12px;padding:24px;max-width:520px;box-shadow:0 10px 30px rgba(0,0,0,.35)}h1{margin-top:0;font-size:24px}p{line-height:1.6;color:#cbd5e1}</style></head><body><div class="card"><h1>Gmail connected successfully</h1><p>Your Gmail access token was stored by the backend.</p><p>You can close this tab and return to your app.</p></div></body></html>`)
   } catch (error) {
     console.error('Gmail callback error', error)
 
@@ -1005,12 +878,7 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
       },
     })
 
-    const tokenDoc = await db
-      .collection('users')
-      .doc(uid)
-      .collection('provider_tokens')
-      .doc('gmail')
-      .get()
+    const tokenDoc = await db.collection('users').doc(uid).collection('provider_tokens').doc('gmail').get()
 
     if (!tokenDoc.exists) {
       await upsertConnection(uid, 'gmail', {
@@ -1045,27 +913,19 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
       },
     })
 
-    const query =
-      'in:anywhere has:attachment subject:("credit card" OR "card statement" OR estatement OR e-statement OR "monthly statement") -in:spam -in:trash newer_than:365d'
-
+    const query = 'in:anywhere has:attachment subject:("credit card" OR "card statement" OR estatement OR e-statement OR "monthly statement") -in:spam -in:trash newer_than:365d'
     const messageRefs = await listAllMatchingMessages(gmail, query)
     const statementsRef = db.collection('users').doc(uid).collection('statements')
 
     let scanned = 0
     let imported = 0
     let skipped = 0
-
     const matchedStatementIds = new Set()
 
     for (const ref of messageRefs) {
       scanned += 1
 
-      const msg = await gmail.users.messages.get({
-        userId: 'me',
-        id: ref.id,
-        format: 'full',
-      })
-
+      const msg = await gmail.users.messages.get({ userId: 'me', id: ref.id, format: 'full' })
       const payload = msg.data.payload || {}
       const headers = payload.headers || []
       const subject = getHeader(headers, 'Subject')
@@ -1074,7 +934,6 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
       const attachments = collectAttachments(payload.parts || [])
       const attachmentNames = attachments.map((item) => item.filename)
       const snippet = msg.data.snippet || ''
-
       const normalizedSubject = String(subject || '').toLowerCase()
 
       const subjectLooksLikeCardStatement =
@@ -1130,16 +989,11 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
       imported += 1
     }
 
-    const existingStatementsSnap = await statementsRef
-      .where('source', '==', 'gmail')
-      .get()
-
+    const existingStatementsSnap = await statementsRef.where('source', '==', 'gmail').get()
     const cleanupBatch = db.batch()
 
     for (const doc of existingStatementsSnap.docs) {
-      if (!matchedStatementIds.has(doc.id)) {
-        cleanupBatch.delete(doc.ref)
-      }
+      if (!matchedStatementIds.has(doc.id)) cleanupBatch.delete(doc.ref)
     }
 
     await cleanupBatch.commit()
@@ -1160,12 +1014,7 @@ app.get('/api/gmail/statements', authMiddleware, async (req, res) => {
       },
     })
 
-    return res.json({
-      imported,
-      liabilitiesImported,
-      messages: scanned,
-      skipped,
-    })
+    return res.json({ imported, liabilitiesImported, messages: scanned, skipped })
   } catch (error) {
     console.error('Gmail statements sync error', error)
 
@@ -1189,9 +1038,7 @@ app.post('/api/statements/:id/mark-paid', authMiddleware, async (req, res) => {
     const statementRef = db.collection('users').doc(uid).collection('statements').doc(statementId)
     const snapshot = await statementRef.get()
 
-    if (!snapshot.exists) {
-      return res.status(404).json({ error: 'Statement not found' })
-    }
+    if (!snapshot.exists) return res.status(404).json({ error: 'Statement not found' })
 
     const data = snapshot.data() || {}
     const totalDue = Number(data?.statementSummary?.totalDue || 0)
@@ -1222,9 +1069,7 @@ app.post('/api/statements/:id/mark-unpaid', authMiddleware, async (req, res) => 
     const statementRef = db.collection('users').doc(uid).collection('statements').doc(statementId)
     const snapshot = await statementRef.get()
 
-    if (!snapshot.exists) {
-      return res.status(404).json({ error: 'Statement not found' })
-    }
+    if (!snapshot.exists) return res.status(404).json({ error: 'Statement not found' })
 
     await statementRef.set(
       {
@@ -1282,9 +1127,7 @@ function parseHoldingsWorkbook(buffer) {
   const rows = getSheetRows(buffer, 'HOLDINGS_BOOK')
   const metadata = extractMetadata(rows)
   const headerRowIndex = findHeaderRow(rows, 'Stock Symbol')
-  if (headerRowIndex === -1) {
-    throw new Error('Holdings table header not found in HOLDINGS_BOOK sheet')
-  }
+  if (headerRowIndex === -1) throw new Error('Holdings table header not found in HOLDINGS_BOOK sheet')
 
   const headers = rows[headerRowIndex].map((h) => String(h).trim())
   const dataRows = rows.slice(headerRowIndex + 1).filter((row) => String(row[0] || '').trim())
@@ -1315,9 +1158,7 @@ function parseOrdersWorkbook(buffer) {
   const rows = getSheetRows(buffer, 'ORDER_BOOK')
   const metadata = extractMetadata(rows)
   const headerRowIndex = findHeaderRow(rows, 'Stock Name')
-  if (headerRowIndex === -1) {
-    throw new Error('Orders table header not found in ORDER_BOOK sheet')
-  }
+  if (headerRowIndex === -1) throw new Error('Orders table header not found in ORDER_BOOK sheet')
 
   const headers = rows[headerRowIndex].map((h) => String(h).trim())
   const dataRows = rows.slice(headerRowIndex + 1).filter((row) => String(row[1] || '').trim())
@@ -1343,199 +1184,148 @@ function parseOrdersWorkbook(buffer) {
   return { metadata, transactions }
 }
 
-app.post(
-  '/api/indmoney/import',
-  authMiddleware,
-  upload.fields([
-    { name: 'holdings', maxCount: 1 },
-    { name: 'orders', maxCount: 1 },
-  ]),
-  async (req, res) => {
-    try {
-      const uid = req.user.uid
-      const holdingsFile = req.files?.holdings?.[0]
-      const ordersFile = req.files?.orders?.[0]
+app.post('/api/indmoney/import', authMiddleware, upload.fields([{ name: 'holdings', maxCount: 1 }, { name: 'orders', maxCount: 1 }]), async (req, res) => {
+  try {
+    const uid = req.user.uid
+    const holdingsFile = req.files?.holdings?.[0]
+    const ordersFile = req.files?.orders?.[0]
 
-      if (!holdingsFile || !ordersFile) {
-        return res
-          .status(400)
-          .json({ error: 'Both holdings and orders files are required' })
-      }
-
-      await upsertConnection(uid, 'indmoney', {
-        status: 'syncing',
-        accountLabel: 'INDmoney',
-        metadata: {
-          description: 'Importing uploaded US holdings and orders reports',
-          mode: 'manual_upload',
-        },
-      })
-
-      const holdingsData = parseHoldingsWorkbook(holdingsFile.buffer)
-      const ordersData = parseOrdersWorkbook(ordersFile.buffer)
-
-      const holdingsRef = db.collection('users').doc(uid).collection('holdings')
-      const transactionsRef = db.collection('users').doc(uid).collection('transactions')
-      const symbolNameMap = new Map()
-
-      for (const tx of ordersData.transactions) {
-        if (tx.symbol && tx.stockName && !symbolNameMap.has(tx.symbol)) {
-          symbolNameMap.set(tx.symbol, tx.stockName)
-        }
-      }
-
-      const batch = db.batch()
-
-      for (const holding of holdingsData.holdings) {
-        const name = symbolNameMap.get(holding.symbol) || holding.symbol
-        const type = inferUsAssetType(holding.symbol, name)
-        const docId = `indmoney-${holding.symbol}`
-
-        batch.set(
-          holdingsRef.doc(docId),
-          {
-            userId: uid,
-            instrumentId: holding.symbol,
-            symbol: holding.symbol,
-            name,
-            type,
-            source: 'indmoney',
-            provider: 'indmoney',
-            exchange: 'US',
-            segment: 'US_EQUITY',
-            quantity: holding.quantity,
-            avgBuyPrice: holding.avgBuyPrice,
-            currentPrice: holding.currentPrice,
-            currentValue: holding.currentValue,
-            currency: 'USD',
-            broker: holdingsData.metadata['Broker Name'] || null,
-            brokerAccount: String(holdingsData.metadata['Broker Account'] || ''),
-            importSource: 'manual_upload',
-            asOfDate: holdingsData.metadata['Holdings as on'] || null,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        )
-      }
-
-      for (const tx of ordersData.transactions) {
-        const txId = tx.brokerReferenceId || crypto.randomUUID()
-        batch.set(
-          transactionsRef.doc(`indmoney-${txId}`),
-          {
-            userId: uid,
-            source: 'indmoney',
-            provider: 'indmoney',
-            broker: ordersData.metadata['Broker Name'] || null,
-            brokerAccount: String(ordersData.metadata['Broker Account'] || ''),
-            symbol: tx.symbol,
-            name: tx.stockName || tx.symbol,
-            transactionType: tx.transactionType,
-            orderType: tx.orderType,
-            quantity: tx.quantity,
-            price: tx.price,
-            amount: tx.orderAmount,
-            brokerage: tx.brokerage,
-            currency: tx.currency,
-            orderPlacedAt: tx.orderPlacedTime || null,
-            executedAt: tx.orderExecutionTime || null,
-            brokerReferenceId: tx.brokerReferenceId,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        )
-      }
-
-      batch.set(
-        db.collection('users').doc(uid).collection('connections').doc('indmoney'),
-        {
-          provider: 'indmoney',
-          status: 'connected',
-          accountLabel: 'INDmoney',
-          lastSyncAt: admin.firestore.FieldValue.serverTimestamp(),
-          metadata: {
-            description: `Imported ${holdingsData.holdings.length} holdings and ${ordersData.transactions.length} transactions`,
-            mode: 'manual_upload',
-            broker:
-              holdingsData.metadata['Broker Name'] ||
-              ordersData.metadata['Broker Name'] ||
-              null,
-            brokerAccount: String(
-              holdingsData.metadata['Broker Account'] ||
-              ordersData.metadata['Broker Account'] ||
-              ''
-            ),
-            holdingsAsOn: holdingsData.metadata['Holdings as on'] || null,
-            periodFrom: ordersData.metadata['Period From'] || null,
-            periodTo: ordersData.metadata['Period To'] || null,
-          },
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      )
-
-      await batch.commit()
-
-      return res.json({
-        importedHoldings: holdingsData.holdings.length,
-        importedTransactions: ordersData.transactions.length,
-        broker:
-          holdingsData.metadata['Broker Name'] ||
-          ordersData.metadata['Broker Name'] ||
-          null,
-        brokerAccount: String(
-          holdingsData.metadata['Broker Account'] ||
-          ordersData.metadata['Broker Account'] ||
-          ''
-        ),
-      })
-    } catch (error) {
-      console.error('INDmoney import failed', error)
-
-      await upsertConnection(req.user.uid, 'indmoney', {
-        status: 'error',
-        accountLabel: 'INDmoney',
-        metadata: {
-          description: 'Manual import failed',
-          error: error instanceof Error ? error.message : String(error),
-        },
-      })
-
-      return res.status(500).json({ error: 'Failed to import INDmoney reports' })
+    if (!holdingsFile || !ordersFile) {
+      return res.status(400).json({ error: 'Both holdings and orders files are required' })
     }
+
+    await upsertConnection(uid, 'indmoney', {
+      status: 'syncing',
+      accountLabel: 'INDmoney',
+      metadata: {
+        description: 'Importing uploaded US holdings and orders reports',
+        mode: 'manual_upload',
+      },
+    })
+
+    const holdingsData = parseHoldingsWorkbook(holdingsFile.buffer)
+    const ordersData = parseOrdersWorkbook(ordersFile.buffer)
+
+    const holdingsRef = db.collection('users').doc(uid).collection('holdings')
+    const transactionsRef = db.collection('users').doc(uid).collection('transactions')
+    const symbolNameMap = new Map()
+
+    for (const tx of ordersData.transactions) {
+      if (tx.symbol && tx.stockName && !symbolNameMap.has(tx.symbol)) {
+        symbolNameMap.set(tx.symbol, tx.stockName)
+      }
+    }
+
+    const batch = db.batch()
+
+    for (const holding of holdingsData.holdings) {
+      const name = symbolNameMap.get(holding.symbol) || holding.symbol
+      const type = inferUsAssetType(holding.symbol, name)
+      const docId = `indmoney-${holding.symbol}`
+
+      batch.set(holdingsRef.doc(docId), {
+        userId: uid,
+        instrumentId: holding.symbol,
+        symbol: holding.symbol,
+        name,
+        type,
+        source: 'indmoney',
+        provider: 'indmoney',
+        exchange: 'US',
+        segment: 'US_EQUITY',
+        quantity: holding.quantity,
+        avgBuyPrice: holding.avgBuyPrice,
+        currentPrice: holding.currentPrice,
+        currentValue: holding.currentValue,
+        currency: 'USD',
+        broker: holdingsData.metadata['Broker Name'] || null,
+        brokerAccount: String(holdingsData.metadata['Broker Account'] || ''),
+        importSource: 'manual_upload',
+        asOfDate: holdingsData.metadata['Holdings as on'] || null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true })
+    }
+
+    for (const tx of ordersData.transactions) {
+      const txId = tx.brokerReferenceId || crypto.randomUUID()
+      batch.set(transactionsRef.doc(`indmoney-${txId}`), {
+        userId: uid,
+        source: 'indmoney',
+        provider: 'indmoney',
+        broker: ordersData.metadata['Broker Name'] || null,
+        brokerAccount: String(ordersData.metadata['Broker Account'] || ''),
+        symbol: tx.symbol,
+        name: tx.stockName || tx.symbol,
+        transactionType: tx.transactionType,
+        orderType: tx.orderType,
+        quantity: tx.quantity,
+        price: tx.price,
+        amount: tx.orderAmount,
+        brokerage: tx.brokerage,
+        currency: tx.currency,
+        orderPlacedAt: tx.orderPlacedTime || null,
+        executedAt: tx.orderExecutionTime || null,
+        brokerReferenceId: tx.brokerReferenceId,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true })
+    }
+
+    batch.set(db.collection('users').doc(uid).collection('connections').doc('indmoney'), {
+      provider: 'indmoney',
+      status: 'connected',
+      accountLabel: 'INDmoney',
+      lastSyncAt: admin.firestore.FieldValue.serverTimestamp(),
+      metadata: {
+        description: `Imported ${holdingsData.holdings.length} holdings and ${ordersData.transactions.length} transactions`,
+        mode: 'manual_upload',
+        broker: holdingsData.metadata['Broker Name'] || ordersData.metadata['Broker Name'] || null,
+        brokerAccount: String(holdingsData.metadata['Broker Account'] || ordersData.metadata['Broker Account'] || ''),
+        holdingsAsOn: holdingsData.metadata['Holdings as on'] || null,
+        periodFrom: ordersData.metadata['Period From'] || null,
+        periodTo: ordersData.metadata['Period To'] || null,
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true })
+
+    await batch.commit()
+
+    return res.json({
+      importedHoldings: holdingsData.holdings.length,
+      importedTransactions: ordersData.transactions.length,
+      broker: holdingsData.metadata['Broker Name'] || ordersData.metadata['Broker Name'] || null,
+      brokerAccount: String(holdingsData.metadata['Broker Account'] || ordersData.metadata['Broker Account'] || ''),
+    })
+  } catch (error) {
+    console.error('INDmoney import failed', error)
+
+    await upsertConnection(req.user.uid, 'indmoney', {
+      status: 'error',
+      accountLabel: 'INDmoney',
+      metadata: {
+        description: 'Manual import failed',
+        error: error instanceof Error ? error.message : String(error),
+      },
+    })
+
+    return res.status(500).json({ error: 'Failed to import INDmoney reports' })
   }
-)
+})
 
 function normalizeFixedDepositPayload(body = {}) {
   const bankName = String(body.bankName || '').trim()
   const amount = Number(body.amount || 0)
-  const interestRate = body.interestRate === null || body.interestRate === undefined || body.interestRate === ''
-    ? null
-    : Number(body.interestRate)
+  const interestRate = body.interestRate === null || body.interestRate === undefined || body.interestRate === '' ? null : Number(body.interestRate)
   const startDate = String(body.startDate || '').trim()
   const maturityDate = String(body.maturityDate || '').trim()
   const maturityAmount = Number(body.maturityAmount || amount || 0)
-  const accountNumberLast4 = body.accountNumberLast4
-    ? String(body.accountNumberLast4).trim().slice(-4)
-    : null
+  const accountNumberLast4 = body.accountNumberLast4 ? String(body.accountNumberLast4).trim().slice(-4) : null
   const compoundFrequency = String(body.compoundFrequency || 'quarterly').trim()
   const currency = String(body.currency || 'INR').trim().toUpperCase()
 
-  if (!bankName) {
-    throw new Error('bankName is required')
-  }
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error('amount must be a positive number')
-  }
-
-  if (!startDate) {
-    throw new Error('startDate is required')
-  }
-
-  if (!maturityDate) {
-    throw new Error('maturityDate is required')
-  }
+  if (!bankName) throw new Error('bankName is required')
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('amount must be a positive number')
+  if (!startDate) throw new Error('startDate is required')
+  if (!maturityDate) throw new Error('maturityDate is required')
 
   return {
     bankName,
@@ -1554,11 +1344,7 @@ function normalizeFixedDepositPayload(body = {}) {
 app.post('/api/fixed-deposits', authMiddleware, async (req, res) => {
   try {
     const payload = normalizeFixedDepositPayload(req.body)
-    const fixedDepositRef = db
-      .collection('users')
-      .doc(req.user.uid)
-      .collection('fixed_deposits')
-      .doc()
+    const fixedDepositRef = db.collection('users').doc(req.user.uid).collection('fixed_deposits').doc()
 
     await fixedDepositRef.set({
       userId: req.user.uid,
@@ -1578,20 +1364,14 @@ app.post('/api/fixed-deposits', authMiddleware, async (req, res) => {
     return res.json({ ok: true, id: fixedDepositRef.id })
   } catch (error) {
     console.error('Fixed deposit create error', error)
-    return res.status(400).json({
-      error: error instanceof Error ? error.message : 'Failed to create fixed deposit',
-    })
+    return res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to create fixed deposit' })
   }
 })
 
 app.patch('/api/fixed-deposits/:fixedDepositId', authMiddleware, async (req, res) => {
   try {
     const payload = normalizeFixedDepositPayload(req.body)
-    const fixedDepositRef = db
-      .collection('users')
-      .doc(req.user.uid)
-      .collection('fixed_deposits')
-      .doc(req.params.fixedDepositId)
+    const fixedDepositRef = db.collection('users').doc(req.user.uid).collection('fixed_deposits').doc(req.params.fixedDepositId)
 
     await fixedDepositRef.set(
       {
@@ -1604,33 +1384,22 @@ app.patch('/api/fixed-deposits/:fixedDepositId', authMiddleware, async (req, res
     return res.json({ ok: true, id: req.params.fixedDepositId })
   } catch (error) {
     console.error('Fixed deposit update error', error)
-    return res.status(400).json({
-      error: error instanceof Error ? error.message : 'Failed to update fixed deposit',
-    })
+    return res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to update fixed deposit' })
   }
 })
 
 app.delete('/api/fixed-deposits/:fixedDepositId', authMiddleware, async (req, res) => {
   try {
-    const fixedDepositRef = db
-      .collection('users')
-      .doc(req.user.uid)
-      .collection('fixed_deposits')
-      .doc(req.params.fixedDepositId)
-
+    const fixedDepositRef = db.collection('users').doc(req.user.uid).collection('fixed_deposits').doc(req.params.fixedDepositId)
     await fixedDepositRef.delete()
-
     return res.json({ ok: true, id: req.params.fixedDepositId })
   } catch (error) {
     console.error('Fixed deposit delete error', error)
-    return res.status(400).json({
-      error: error instanceof Error ? error.message : 'Failed to delete fixed deposit',
-    })
+    return res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to delete fixed deposit' })
   }
 })
 
 const PORT = process.env.PORT || 4000
-
 app.listen(PORT, () => {
   console.log(`API running on http://localhost:${PORT}`)
 })
